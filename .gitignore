@@ -1,0 +1,18 @@
+## Ignore build outputs
+bin/
+obj/
+publish/
+
+## Sensitive files
+.env
+*.db
+*.db-shm
+*.db-wal
+
+## IDE
+.vs/
+.vscode/
+*.user
+
+## Logs
+*.log
