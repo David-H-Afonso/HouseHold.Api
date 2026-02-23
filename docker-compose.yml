@@ -1,0 +1,36 @@
+version: "3.9"
+
+# ─── Household API - Docker Compose ────────────────────────────────────────────
+# Usage:
+#   1. Copy .env.example to .env and fill in your values
+#   2. docker compose up -d
+#
+# For CasaOS: use the individual container env vars in the CasaOS UI instead.
+
+services:
+  household-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: household-api:latest
+    container_name: household-api
+    restart: unless-stopped
+    ports:
+      - "${API_PORT:-8082}:8080"
+    volumes:
+      - household-data:/data
+    env_file:
+      - .env
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - DATABASE_PATH=/data/household.db
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  household-data:
+    driver: local
