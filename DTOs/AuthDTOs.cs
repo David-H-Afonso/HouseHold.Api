@@ -8,12 +8,7 @@ public record RefreshRequest(string RefreshToken, string? DeviceName = null);
 
 public record LogoutRequest(string RefreshToken);
 
-public record CreateUserRequest(
-    string Email,
-    string UserName,
-    string Password,
-    bool IsAdmin = false
-);
+public record CreateUserRequest(string Email, string UserName, string Password, bool IsAdmin = false);
 
 // ── Responses ─────────────────────────────────────────────────────────────────
 
@@ -27,11 +22,7 @@ public record LoginResponse(
     DateTime AccessTokenExpiresAt
 );
 
-public record RefreshResponse(
-    string AccessToken,
-    string RefreshToken,
-    DateTime AccessTokenExpiresAt
-);
+public record RefreshResponse(string AccessToken, string RefreshToken, DateTime AccessTokenExpiresAt);
 
 public record UserDto(
     Guid Id,
@@ -43,9 +34,4 @@ public record UserDto(
     DateTime UpdatedAt
 );
 
-public record MeResponse(
-    Guid UserId,
-    string Email,
-    string UserName,
-    bool IsAdmin
-);
+public record MeResponse(Guid UserId, string Email, string UserName, bool IsAdmin);

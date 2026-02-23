@@ -17,12 +17,13 @@ namespace Household.Api.Migrations
                 {
                     Id = table.Column<Guid>(type: "TEXT", nullable: false),
                     Name = table.Column<string>(type: "TEXT", maxLength: 100, nullable: false),
-                    CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false)
+                    CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false),
                 },
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_Rooms", x => x.Id);
-                });
+                }
+            );
 
             migrationBuilder.CreateTable(
                 name: "Users",
@@ -35,12 +36,13 @@ namespace Household.Api.Migrations
                     IsAdmin = table.Column<bool>(type: "INTEGER", nullable: false),
                     IsActive = table.Column<bool>(type: "INTEGER", nullable: false),
                     CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false),
-                    UpdatedAt = table.Column<DateTime>(type: "TEXT", nullable: false)
+                    UpdatedAt = table.Column<DateTime>(type: "TEXT", nullable: false),
                 },
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_Users", x => x.Id);
-                });
+                }
+            );
 
             migrationBuilder.CreateTable(
                 name: "DishTemplates",
@@ -51,7 +53,7 @@ namespace Household.Api.Migrations
                     OwnerUserId = table.Column<Guid>(type: "TEXT", nullable: true),
                     IsShared = table.Column<bool>(type: "INTEGER", nullable: false),
                     CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false),
-                    UpdatedAt = table.Column<DateTime>(type: "TEXT", nullable: false)
+                    UpdatedAt = table.Column<DateTime>(type: "TEXT", nullable: false),
                 },
                 constraints: table =>
                 {
@@ -61,8 +63,10 @@ namespace Household.Api.Migrations
                         column: x => x.OwnerUserId,
                         principalTable: "Users",
                         principalColumn: "Id",
-                        onDelete: ReferentialAction.SetNull);
-                });
+                        onDelete: ReferentialAction.SetNull
+                    );
+                }
+            );
 
             migrationBuilder.CreateTable(
                 name: "FoodItems",
@@ -77,7 +81,7 @@ namespace Household.Api.Migrations
                     FatPer100g = table.Column<decimal>(type: "decimal(8,2)", nullable: false),
                     CreatedByUserId = table.Column<Guid>(type: "TEXT", nullable: false),
                     CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false),
-                    UpdatedAt = table.Column<DateTime>(type: "TEXT", nullable: false)
+                    UpdatedAt = table.Column<DateTime>(type: "TEXT", nullable: false),
                 },
                 constraints: table =>
                 {
@@ -87,8 +91,10 @@ namespace Household.Api.Migrations
                         column: x => x.CreatedByUserId,
                         principalTable: "Users",
                         principalColumn: "Id",
-                        onDelete: ReferentialAction.Restrict);
-                });
+                        onDelete: ReferentialAction.Restrict
+                    );
+                }
+            );
 
             migrationBuilder.CreateTable(
                 name: "HomeIssues",
@@ -102,7 +108,7 @@ namespace Household.Api.Migrations
                     Priority = table.Column<int>(type: "INTEGER", nullable: false),
                     CreatedByUserId = table.Column<Guid>(type: "TEXT", nullable: false),
                     CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false),
-                    ResolvedAt = table.Column<DateTime>(type: "TEXT", nullable: true)
+                    ResolvedAt = table.Column<DateTime>(type: "TEXT", nullable: true),
                 },
                 constraints: table =>
                 {
@@ -112,14 +118,17 @@ namespace Household.Api.Migrations
                         column: x => x.RoomId,
                         principalTable: "Rooms",
                         principalColumn: "Id",
-                        onDelete: ReferentialAction.SetNull);
+                        onDelete: ReferentialAction.SetNull
+                    );
                     table.ForeignKey(
                         name: "FK_HomeIssues_Users_CreatedByUserId",
                         column: x => x.CreatedByUserId,
                         principalTable: "Users",
                         principalColumn: "Id",
-                        onDelete: ReferentialAction.Restrict);
-                });
+                        onDelete: ReferentialAction.Restrict
+                    );
+                }
+            );
 
             migrationBuilder.CreateTable(
                 name: "RefreshTokens",
@@ -133,7 +142,7 @@ namespace Household.Api.Migrations
                     RevokedAt = table.Column<DateTime>(type: "TEXT", nullable: true),
                     ReplacedByTokenId = table.Column<Guid>(type: "TEXT", nullable: true),
                     DeviceName = table.Column<string>(type: "TEXT", nullable: true),
-                    UserAgent = table.Column<string>(type: "TEXT", nullable: true)
+                    UserAgent = table.Column<string>(type: "TEXT", nullable: true),
                 },
                 constraints: table =>
                 {
@@ -143,8 +152,10 @@ namespace Household.Api.Migrations
                         column: x => x.UserId,
                         principalTable: "Users",
                         principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
-                });
+                        onDelete: ReferentialAction.Cascade
+                    );
+                }
+            );
 
             migrationBuilder.CreateTable(
                 name: "TaskTemplates",
@@ -164,7 +175,7 @@ namespace Household.Api.Migrations
                     StartDate = table.Column<DateOnly>(type: "TEXT", nullable: false),
                     CarryOverIfMissed = table.Column<bool>(type: "INTEGER", nullable: false),
                     CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false),
-                    UpdatedAt = table.Column<DateTime>(type: "TEXT", nullable: false)
+                    UpdatedAt = table.Column<DateTime>(type: "TEXT", nullable: false),
                 },
                 constraints: table =>
                 {
@@ -174,14 +185,17 @@ namespace Household.Api.Migrations
                         column: x => x.RoomId,
                         principalTable: "Rooms",
                         principalColumn: "Id",
-                        onDelete: ReferentialAction.SetNull);
+                        onDelete: ReferentialAction.SetNull
+                    );
                     table.ForeignKey(
                         name: "FK_TaskTemplates_Users_AssignedToUserId",
                         column: x => x.AssignedToUserId,
                         principalTable: "Users",
                         principalColumn: "Id",
-                        onDelete: ReferentialAction.SetNull);
-                });
+                        onDelete: ReferentialAction.SetNull
+                    );
+                }
+            );
 
             migrationBuilder.CreateTable(
                 name: "MealEntries",
@@ -196,7 +210,7 @@ namespace Household.Api.Migrations
                     Status = table.Column<int>(type: "INTEGER", nullable: false),
                     Notes = table.Column<string>(type: "TEXT", maxLength: 2000, nullable: true),
                     CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false),
-                    UpdatedAt = table.Column<DateTime>(type: "TEXT", nullable: false)
+                    UpdatedAt = table.Column<DateTime>(type: "TEXT", nullable: false),
                 },
                 constraints: table =>
                 {
@@ -206,14 +220,17 @@ namespace Household.Api.Migrations
                         column: x => x.DishTemplateId,
                         principalTable: "DishTemplates",
                         principalColumn: "Id",
-                        onDelete: ReferentialAction.SetNull);
+                        onDelete: ReferentialAction.SetNull
+                    );
                     table.ForeignKey(
                         name: "FK_MealEntries_Users_UserId",
                         column: x => x.UserId,
                         principalTable: "Users",
                         principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
-                });
+                        onDelete: ReferentialAction.Cascade
+                    );
+                }
+            );
 
             migrationBuilder.CreateTable(
                 name: "DishTemplateItems",
@@ -223,7 +240,7 @@ namespace Household.Api.Migrations
                     DishTemplateId = table.Column<Guid>(type: "TEXT", nullable: false),
                     FoodItemId = table.Column<Guid>(type: "TEXT", nullable: false),
                     Grams = table.Column<decimal>(type: "decimal(8,2)", nullable: false),
-                    SortOrder = table.Column<int>(type: "INTEGER", nullable: false)
+                    SortOrder = table.Column<int>(type: "INTEGER", nullable: false),
                 },
                 constraints: table =>
                 {
@@ -233,14 +250,17 @@ namespace Household.Api.Migrations
                         column: x => x.DishTemplateId,
                         principalTable: "DishTemplates",
                         principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
+                        onDelete: ReferentialAction.Cascade
+                    );
                     table.ForeignKey(
                         name: "FK_DishTemplateItems_FoodItems_FoodItemId",
                         column: x => x.FoodItemId,
                         principalTable: "FoodItems",
                         principalColumn: "Id",
-                        onDelete: ReferentialAction.Restrict);
-                });
+                        onDelete: ReferentialAction.Restrict
+                    );
+                }
+            );
 
             migrationBuilder.CreateTable(
                 name: "TaskInstances",
@@ -254,7 +274,7 @@ namespace Household.Api.Migrations
                     Status = table.Column<int>(type: "INTEGER", nullable: false),
                     CompletedAt = table.Column<DateTime>(type: "TEXT", nullable: true),
                     CompletedByUserId = table.Column<Guid>(type: "TEXT", nullable: true),
-                    Notes = table.Column<string>(type: "TEXT", nullable: true)
+                    Notes = table.Column<string>(type: "TEXT", nullable: true),
                 },
                 constraints: table =>
                 {
@@ -264,20 +284,24 @@ namespace Household.Api.Migrations
                         column: x => x.TaskTemplateId,
                         principalTable: "TaskTemplates",
                         principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
+                        onDelete: ReferentialAction.Cascade
+                    );
                     table.ForeignKey(
                         name: "FK_TaskInstances_Users_AssignedToUserId",
                         column: x => x.AssignedToUserId,
                         principalTable: "Users",
                         principalColumn: "Id",
-                        onDelete: ReferentialAction.SetNull);
+                        onDelete: ReferentialAction.SetNull
+                    );
                     table.ForeignKey(
                         name: "FK_TaskInstances_Users_CompletedByUserId",
                         column: x => x.CompletedByUserId,
                         principalTable: "Users",
                         principalColumn: "Id",
-                        onDelete: ReferentialAction.SetNull);
-                });
+                        onDelete: ReferentialAction.SetNull
+                    );
+                }
+            );
 
             migrationBuilder.CreateTable(
                 name: "MealEntryItems",
@@ -286,7 +310,7 @@ namespace Household.Api.Migrations
                     Id = table.Column<Guid>(type: "TEXT", nullable: false),
                     MealEntryId = table.Column<Guid>(type: "TEXT", nullable: false),
                     FoodItemId = table.Column<Guid>(type: "TEXT", nullable: false),
-                    Grams = table.Column<decimal>(type: "decimal(8,2)", nullable: false)
+                    Grams = table.Column<decimal>(type: "decimal(8,2)", nullable: false),
                 },
                 constraints: table =>
                 {
@@ -296,155 +320,145 @@ namespace Household.Api.Migrations
                         column: x => x.FoodItemId,
                         principalTable: "FoodItems",
                         principalColumn: "Id",
-                        onDelete: ReferentialAction.Restrict);
+                        onDelete: ReferentialAction.Restrict
+                    );
                     table.ForeignKey(
                         name: "FK_MealEntryItems_MealEntries_MealEntryId",
                         column: x => x.MealEntryId,
                         principalTable: "MealEntries",
                         principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
-                });
+                        onDelete: ReferentialAction.Cascade
+                    );
+                }
+            );
 
             migrationBuilder.CreateIndex(
                 name: "IX_DishTemplateItems_DishTemplateId",
                 table: "DishTemplateItems",
-                column: "DishTemplateId");
+                column: "DishTemplateId"
+            );
 
             migrationBuilder.CreateIndex(
                 name: "IX_DishTemplateItems_FoodItemId",
                 table: "DishTemplateItems",
-                column: "FoodItemId");
+                column: "FoodItemId"
+            );
 
             migrationBuilder.CreateIndex(
                 name: "IX_DishTemplates_OwnerUserId",
                 table: "DishTemplates",
-                column: "OwnerUserId");
+                column: "OwnerUserId"
+            );
 
             migrationBuilder.CreateIndex(
                 name: "IX_FoodItems_CreatedByUserId",
                 table: "FoodItems",
-                column: "CreatedByUserId");
+                column: "CreatedByUserId"
+            );
 
             migrationBuilder.CreateIndex(
                 name: "IX_FoodItems_NameNormalized",
                 table: "FoodItems",
-                column: "NameNormalized");
+                column: "NameNormalized"
+            );
 
             migrationBuilder.CreateIndex(
                 name: "IX_HomeIssues_CreatedByUserId",
                 table: "HomeIssues",
-                column: "CreatedByUserId");
+                column: "CreatedByUserId"
+            );
 
-            migrationBuilder.CreateIndex(
-                name: "IX_HomeIssues_RoomId",
-                table: "HomeIssues",
-                column: "RoomId");
+            migrationBuilder.CreateIndex(name: "IX_HomeIssues_RoomId", table: "HomeIssues", column: "RoomId");
 
             migrationBuilder.CreateIndex(
                 name: "IX_MealEntries_DishTemplateId",
                 table: "MealEntries",
-                column: "DishTemplateId");
+                column: "DishTemplateId"
+            );
 
             migrationBuilder.CreateIndex(
                 name: "IX_MealEntries_UserId_EatenAt",
                 table: "MealEntries",
-                columns: new[] { "UserId", "EatenAt" });
+                columns: new[] { "UserId", "EatenAt" }
+            );
 
             migrationBuilder.CreateIndex(
                 name: "IX_MealEntryItems_FoodItemId",
                 table: "MealEntryItems",
-                column: "FoodItemId");
+                column: "FoodItemId"
+            );
 
             migrationBuilder.CreateIndex(
                 name: "IX_MealEntryItems_MealEntryId",
                 table: "MealEntryItems",
-                column: "MealEntryId");
+                column: "MealEntryId"
+            );
 
             migrationBuilder.CreateIndex(
                 name: "IX_RefreshTokens_TokenHash",
                 table: "RefreshTokens",
                 column: "TokenHash",
-                unique: true);
+                unique: true
+            );
 
-            migrationBuilder.CreateIndex(
-                name: "IX_RefreshTokens_UserId",
-                table: "RefreshTokens",
-                column: "UserId");
+            migrationBuilder.CreateIndex(name: "IX_RefreshTokens_UserId", table: "RefreshTokens", column: "UserId");
 
-            migrationBuilder.CreateIndex(
-                name: "IX_Rooms_Name",
-                table: "Rooms",
-                column: "Name",
-                unique: true);
+            migrationBuilder.CreateIndex(name: "IX_Rooms_Name", table: "Rooms", column: "Name", unique: true);
 
             migrationBuilder.CreateIndex(
                 name: "IX_TaskInstances_AssignedToUserId",
                 table: "TaskInstances",
-                column: "AssignedToUserId");
+                column: "AssignedToUserId"
+            );
 
             migrationBuilder.CreateIndex(
                 name: "IX_TaskInstances_CompletedByUserId",
                 table: "TaskInstances",
-                column: "CompletedByUserId");
+                column: "CompletedByUserId"
+            );
 
             migrationBuilder.CreateIndex(
                 name: "IX_TaskInstances_TaskTemplateId_DueDate",
                 table: "TaskInstances",
                 columns: new[] { "TaskTemplateId", "DueDate" },
-                unique: true);
+                unique: true
+            );
 
             migrationBuilder.CreateIndex(
                 name: "IX_TaskTemplates_AssignedToUserId",
                 table: "TaskTemplates",
-                column: "AssignedToUserId");
+                column: "AssignedToUserId"
+            );
 
-            migrationBuilder.CreateIndex(
-                name: "IX_TaskTemplates_RoomId",
-                table: "TaskTemplates",
-                column: "RoomId");
+            migrationBuilder.CreateIndex(name: "IX_TaskTemplates_RoomId", table: "TaskTemplates", column: "RoomId");
 
-            migrationBuilder.CreateIndex(
-                name: "IX_Users_Email",
-                table: "Users",
-                column: "Email",
-                unique: true);
+            migrationBuilder.CreateIndex(name: "IX_Users_Email", table: "Users", column: "Email", unique: true);
         }
 
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.DropTable(
-                name: "DishTemplateItems");
+            migrationBuilder.DropTable(name: "DishTemplateItems");
 
-            migrationBuilder.DropTable(
-                name: "HomeIssues");
+            migrationBuilder.DropTable(name: "HomeIssues");
 
-            migrationBuilder.DropTable(
-                name: "MealEntryItems");
+            migrationBuilder.DropTable(name: "MealEntryItems");
 
-            migrationBuilder.DropTable(
-                name: "RefreshTokens");
+            migrationBuilder.DropTable(name: "RefreshTokens");
 
-            migrationBuilder.DropTable(
-                name: "TaskInstances");
+            migrationBuilder.DropTable(name: "TaskInstances");
 
-            migrationBuilder.DropTable(
-                name: "FoodItems");
+            migrationBuilder.DropTable(name: "FoodItems");
 
-            migrationBuilder.DropTable(
-                name: "MealEntries");
+            migrationBuilder.DropTable(name: "MealEntries");
 
-            migrationBuilder.DropTable(
-                name: "TaskTemplates");
+            migrationBuilder.DropTable(name: "TaskTemplates");
 
-            migrationBuilder.DropTable(
-                name: "DishTemplates");
+            migrationBuilder.DropTable(name: "DishTemplates");
 
-            migrationBuilder.DropTable(
-                name: "Rooms");
+            migrationBuilder.DropTable(name: "Rooms");
 
-            migrationBuilder.DropTable(
-                name: "Users");
+            migrationBuilder.DropTable(name: "Users");
         }
     }
 }

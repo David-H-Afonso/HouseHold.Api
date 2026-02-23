@@ -1,6 +1,3 @@
-using Microsoft.EntityFrameworkCore;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using Household.Api.Configuration;
 using Household.Api.Data;
@@ -9,6 +6,9 @@ using Household.Api.Helpers;
 using Household.Api.Middleware;
 using Household.Api.Models.Auth;
 using Household.Api.Services;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -22,7 +22,8 @@ if (File.Exists(envFilePath))
 {
     foreach (var line in File.ReadAllLines(envFilePath))
     {
-        if (string.IsNullOrWhiteSpace(line) || line.StartsWith('#')) continue;
+        if (string.IsNullOrWhiteSpace(line) || line.StartsWith('#'))
+            continue;
         var parts = line.Split('=', 2);
         if (parts.Length == 2)
             Environment.SetEnvironmentVariable(parts[0].Trim(), parts[1].Trim());
@@ -44,8 +45,8 @@ ApplyEnvOverrideBool(builder.Configuration, "SeedSettings:AdminEnabled", "SEED_A
 ApplyEnvOverrideBool(builder.Configuration, "SeedSettings:DemoDataEnabled", "DEMO_DATA_ENABLED");
 
 // CORS: support comma-separated FRONTEND_URL or CORS_ALLOWED_ORIGINS
-var corsOriginEnv = Environment.GetEnvironmentVariable("CORS_ALLOWED_ORIGINS")
-                 ?? Environment.GetEnvironmentVariable("FRONTEND_URL");
+var corsOriginEnv =
+    Environment.GetEnvironmentVariable("CORS_ALLOWED_ORIGINS") ?? Environment.GetEnvironmentVariable("FRONTEND_URL");
 if (!string.IsNullOrWhiteSpace(corsOriginEnv))
 {
     var origins = corsOriginEnv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -95,10 +96,10 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 var jwtSettings = builder.Configuration.GetSection(JwtSettings.SectionName).Get<JwtSettings>() ?? new();
 
 if (string.IsNullOrWhiteSpace(jwtSettings.SecretKey))
-    throw new InvalidOperationException(
-        "JWT SecretKey is not configured. Set JWT_SECRET_KEY environment variable.");
+    throw new InvalidOperationException("JWT SecretKey is not configured. Set JWT_SECRET_KEY environment variable.");
 
-builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+builder
+    .Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
         options.TokenValidationParameters = new TokenValidationParameters
@@ -110,7 +111,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidIssuer = jwtSettings.Issuer,
             ValidAudience = jwtSettings.Audience,
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSettings.SecretKey)),
-            ClockSkew = TimeSpan.FromSeconds(30)
+            ClockSkew = TimeSpan.FromSeconds(30),
         };
 
         options.Events = new JwtBearerEvents
@@ -123,7 +124,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                 else
                     logger.LogError(ctx.Exception, "JWT authentication failed");
                 return Task.CompletedTask;
-            }
+            },
         };
     });
 
@@ -134,68 +135,77 @@ var corsSettings = builder.Configuration.GetSection(CorsSettings.SectionName).Ge
 
 if (corsSettings.AllowedOrigins.Count == 0 && !builder.Environment.IsDevelopment())
     throw new InvalidOperationException(
-        "CORS: no AllowedOrigins configured for production. " +
-        "Set CORS_ALLOWED_ORIGINS env var or CorsSettings:AllowedOrigins[]. " +
-        "Refusing to start with AllowAnyOrigin in production.");
+        "CORS: no AllowedOrigins configured for production. "
+            + "Set CORS_ALLOWED_ORIGINS env var or CorsSettings:AllowedOrigins[]. "
+            + "Refusing to start with AllowAnyOrigin in production."
+    );
 
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("AllowSpecificOrigins", policy =>
-    {
-        if (corsSettings.AllowedOrigins.Count > 0)
+    options.AddPolicy(
+        "AllowSpecificOrigins",
+        policy =>
         {
-            // JWT Bearer: AllowCredentials() is NOT needed.
-            // If you ever switch to cookies, add AllowCredentials() + correct SameSite.
-            policy.WithOrigins(corsSettings.AllowedOrigins.ToArray())
-                  .AllowAnyHeader()
-                  .AllowAnyMethod();
+            if (corsSettings.AllowedOrigins.Count > 0)
+            {
+                // JWT Bearer: AllowCredentials() is NOT needed.
+                // If you ever switch to cookies, add AllowCredentials() + correct SameSite.
+                policy.WithOrigins(corsSettings.AllowedOrigins.ToArray()).AllowAnyHeader().AllowAnyMethod();
+            }
+            else
+            {
+                // Development only: allow any origin when no specific origins are configured.
+                policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod();
+            }
         }
-        else
-        {
-            // Development only: allow any origin when no specific origins are configured.
-            policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod();
-        }
-    });
+    );
 
-    options.AddPolicy("AllowAll", policy =>
-        policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod());
+    options.AddPolicy("AllowAll", policy => policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod());
 });
 
 // ── Swagger ───────────────────────────────────────────────────────────────────
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
-    c.SwaggerDoc("v1", new()
-    {
-        Title = "Household API",
-        Version = "v1",
-        Description = "Backend para gestión doméstica: comida, tareas del hogar e incidencias."
-    });
-
-    c.AddSecurityDefinition("Bearer", new Microsoft.OpenApi.Models.OpenApiSecurityScheme
-    {
-        Description = "JWT Bearer. Formato: Bearer {token}",
-        Name = "Authorization",
-        In = Microsoft.OpenApi.Models.ParameterLocation.Header,
-        Type = Microsoft.OpenApi.Models.SecuritySchemeType.Http,
-        Scheme = "bearer",
-        BearerFormat = "JWT"
-    });
-
-    c.AddSecurityRequirement(new Microsoft.OpenApi.Models.OpenApiSecurityRequirement
-    {
+    c.SwaggerDoc(
+        "v1",
+        new()
         {
-            new Microsoft.OpenApi.Models.OpenApiSecurityScheme
-            {
-                Reference = new Microsoft.OpenApi.Models.OpenApiReference
-                {
-                    Type = Microsoft.OpenApi.Models.ReferenceType.SecurityScheme,
-                    Id = "Bearer"
-                }
-            },
-            Array.Empty<string>()
+            Title = "Household API",
+            Version = "v1",
+            Description = "Backend para gestión doméstica: comida, tareas del hogar e incidencias.",
         }
-    });
+    );
+
+    c.AddSecurityDefinition(
+        "Bearer",
+        new Microsoft.OpenApi.Models.OpenApiSecurityScheme
+        {
+            Description = "JWT Bearer. Formato: Bearer {token}",
+            Name = "Authorization",
+            In = Microsoft.OpenApi.Models.ParameterLocation.Header,
+            Type = Microsoft.OpenApi.Models.SecuritySchemeType.Http,
+            Scheme = "bearer",
+            BearerFormat = "JWT",
+        }
+    );
+
+    c.AddSecurityRequirement(
+        new Microsoft.OpenApi.Models.OpenApiSecurityRequirement
+        {
+            {
+                new Microsoft.OpenApi.Models.OpenApiSecurityScheme
+                {
+                    Reference = new Microsoft.OpenApi.Models.OpenApiReference
+                    {
+                        Type = Microsoft.OpenApi.Models.ReferenceType.SecurityScheme,
+                        Id = "Bearer",
+                    },
+                },
+                Array.Empty<string>()
+            },
+        }
+    );
 });
 
 // ── Services ──────────────────────────────────────────────────────────────────
@@ -219,8 +229,12 @@ using (var scope = app.Services.CreateScope())
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     db.Database.Migrate();
 
-    var seedCfg = scope.ServiceProvider.GetRequiredService<IConfiguration>()
-        .GetSection(SeedSettings.SectionName).Get<SeedSettings>() ?? new();
+    var seedCfg =
+        scope
+            .ServiceProvider.GetRequiredService<IConfiguration>()
+            .GetSection(SeedSettings.SectionName)
+            .Get<SeedSettings>()
+        ?? new();
 
     await SeedAsync(db, seedCfg, scope.ServiceProvider.GetRequiredService<ILogger<Program>>());
 }
@@ -244,27 +258,36 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 // ── Health ────────────────────────────────────────────────────────────────────
-app.MapGet("/health", async (AppDbContext db, ILogger<Program> logger) =>
-{
-    var version = typeof(Program).Assembly.GetName().Version?.ToString(3) ?? "1.0.0";
-    string dbStatus;
-    try
-    {
-        await db.Database.ExecuteSqlRawAsync("SELECT 1");
-        var pending = (await db.Database.GetPendingMigrationsAsync()).ToList();
-        dbStatus = pending.Count == 0 ? "ok" : $"ok ({pending.Count} pending migration(s))";
-    }
-    catch (Exception ex)
-    {
-        logger.LogError(ex, "Health check: DB connectivity failed");
-        dbStatus = "error";
-    }
-    var overall = dbStatus.StartsWith("error") ? "degraded" : "healthy";
-    var payload = new { status = overall, version, db = dbStatus, timestamp = DateTime.UtcNow };
-    return overall == "healthy"
-        ? Results.Ok(payload)
-        : Results.Json(payload, statusCode: 503);
-}).AllowAnonymous().WithTags("System");
+app.MapGet(
+        "/health",
+        async (AppDbContext db, ILogger<Program> logger) =>
+        {
+            var version = typeof(Program).Assembly.GetName().Version?.ToString(3) ?? "1.0.0";
+            string dbStatus;
+            try
+            {
+                await db.Database.ExecuteSqlRawAsync("SELECT 1");
+                var pending = (await db.Database.GetPendingMigrationsAsync()).ToList();
+                dbStatus = pending.Count == 0 ? "ok" : $"ok ({pending.Count} pending migration(s))";
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Health check: DB connectivity failed");
+                dbStatus = "error";
+            }
+            var overall = dbStatus.StartsWith("error") ? "degraded" : "healthy";
+            var payload = new
+            {
+                status = overall,
+                version,
+                db = dbStatus,
+                timestamp = DateTime.UtcNow,
+            };
+            return overall == "healthy" ? Results.Ok(payload) : Results.Json(payload, statusCode: 503);
+        }
+    )
+    .AllowAnonymous()
+    .WithTags("System");
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 app.MapAuthEndpoints();
@@ -281,10 +304,12 @@ app.Run();
 // ── Seed helper ───────────────────────────────────────────────────────────────
 static async Task SeedAsync(AppDbContext db, SeedSettings settings, ILogger logger)
 {
-    if (!settings.AdminEnabled) return;
+    if (!settings.AdminEnabled)
+        return;
 
     var adminExists = await db.Users.AnyAsync(u => u.IsAdmin);
-    if (adminExists) return;
+    if (adminExists)
+        return;
 
     var passwordHash = BCrypt.Net.BCrypt.HashPassword(settings.AdminPassword, workFactor: 12);
 
@@ -294,7 +319,7 @@ static async Task SeedAsync(AppDbContext db, SeedSettings settings, ILogger logg
         UserName = settings.AdminUsername,
         PasswordHash = passwordHash,
         IsAdmin = true,
-        IsActive = true
+        IsActive = true,
     };
 
     db.Users.Add(admin);
@@ -306,17 +331,20 @@ static async Task SeedAsync(AppDbContext db, SeedSettings settings, ILogger logg
 static void ApplyEnvOverride(IConfigurationRoot config, string key, string envVar)
 {
     var value = Environment.GetEnvironmentVariable(envVar);
-    if (!string.IsNullOrWhiteSpace(value)) config[key] = value;
+    if (!string.IsNullOrWhiteSpace(value))
+        config[key] = value;
 }
 
 static void ApplyEnvOverrideInt(IConfigurationRoot config, string key, string envVar)
 {
     var value = Environment.GetEnvironmentVariable(envVar);
-    if (int.TryParse(value, out _)) config[key] = value!;
+    if (int.TryParse(value, out _))
+        config[key] = value!;
 }
 
 static void ApplyEnvOverrideBool(IConfigurationRoot config, string key, string envVar)
 {
     var value = Environment.GetEnvironmentVariable(envVar);
-    if (!string.IsNullOrWhiteSpace(value)) config[key] = value;
+    if (!string.IsNullOrWhiteSpace(value))
+        config[key] = value;
 }

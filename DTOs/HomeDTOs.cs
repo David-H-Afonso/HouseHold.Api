@@ -100,13 +100,7 @@ public record CreateHomeIssueRequest(
     int Priority = 0
 );
 
-public record UpdateHomeIssueRequest(
-    string Title,
-    Guid? RoomId,
-    string? Description,
-    IssueStatus Status,
-    int Priority
-);
+public record UpdateHomeIssueRequest(string Title, Guid? RoomId, string? Description, IssueStatus Status, int Priority);
 
 public record HomeIssueDto(
     Guid Id,

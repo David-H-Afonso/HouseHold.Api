@@ -7,11 +7,11 @@ public enum MealType
     Lunch = 3,
     AfternoonSnack = 4,
     Dinner = 5,
-    Other = 6
+    Other = 6,
 }
 
 public enum MealStatus
 {
     Draft = 0,
-    Final = 1
+    Final = 1,
 }

@@ -34,11 +34,7 @@ public record FoodItemDto(
 
 // ── DishTemplate ──────────────────────────────────────────────────────────────
 
-public record DishTemplateItemRequest(
-    Guid FoodItemId,
-    decimal Grams,
-    int SortOrder = 0
-);
+public record DishTemplateItemRequest(Guid FoodItemId, decimal Grams, int SortOrder = 0);
 
 public record CreateDishTemplateRequest(
     string Name,
@@ -46,11 +42,7 @@ public record CreateDishTemplateRequest(
     List<DishTemplateItemRequest>? Items = null
 );
 
-public record UpdateDishTemplateRequest(
-    string Name,
-    bool IsShared,
-    List<DishTemplateItemRequest>? Items = null
-);
+public record UpdateDishTemplateRequest(string Name, bool IsShared, List<DishTemplateItemRequest>? Items = null);
 
 public record DishTemplateItemDto(
     Guid Id,
@@ -76,10 +68,7 @@ public record DishTemplateDto(
 
 // ── MealEntry ─────────────────────────────────────────────────────────────────
 
-public record MealEntryItemRequest(
-    Guid FoodItemId,
-    decimal Grams
-);
+public record MealEntryItemRequest(Guid FoodItemId, decimal Grams);
 
 public record CreateMealEntryRequest(
     DateTime? EatenAt,

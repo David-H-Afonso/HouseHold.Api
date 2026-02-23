@@ -13,15 +13,14 @@ namespace Household.Api.Migrations
             migrationBuilder.CreateIndex(
                 name: "IX_TaskInstances_DueDate_TimeOfDaySlot",
                 table: "TaskInstances",
-                columns: new[] { "DueDate", "TimeOfDaySlot" });
+                columns: new[] { "DueDate", "TimeOfDaySlot" }
+            );
         }
 
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.DropIndex(
-                name: "IX_TaskInstances_DueDate_TimeOfDaySlot",
-                table: "TaskInstances");
+            migrationBuilder.DropIndex(name: "IX_TaskInstances_DueDate_TimeOfDaySlot", table: "TaskInstances");
         }
     }
 }

@@ -1,7 +1,7 @@
-using Microsoft.EntityFrameworkCore;
 using Household.Api.Data;
 using Household.Api.DTOs;
 using Household.Api.Models.Food;
+using Microsoft.EntityFrameworkCore;
 
 namespace Household.Api.Services;
 
@@ -24,10 +24,7 @@ public class FoodItemService : IFoodItemService
             query = query.Where(f => f.NameNormalized.Contains(normalized));
         }
 
-        return await query
-            .OrderBy(f => f.Name)
-            .Select(f => ToDto(f))
-            .ToListAsync();
+        return await query.OrderBy(f => f.Name).Select(f => ToDto(f)).ToListAsync();
     }
 
     public async Task<FoodItemDto?> GetByIdAsync(Guid id)
@@ -46,7 +43,7 @@ public class FoodItemService : IFoodItemService
             ProteinPer100g = Math.Round(request.ProteinPer100g, 2),
             CarbsPer100g = Math.Round(request.CarbsPer100g, 2),
             FatPer100g = Math.Round(request.FatPer100g, 2),
-            CreatedByUserId = createdByUserId
+            CreatedByUserId = createdByUserId,
         };
 
         _context.FoodItems.Add(item);
@@ -57,7 +54,8 @@ public class FoodItemService : IFoodItemService
     public async Task<FoodItemDto?> UpdateAsync(Guid id, UpdateFoodItemRequest request)
     {
         var item = await _context.FoodItems.FindAsync(id);
-        if (item == null) return null;
+        if (item == null)
+            return null;
 
         item.Name = request.Name.Trim();
         item.NameNormalized = NormalizeName(request.Name);
@@ -73,7 +71,8 @@ public class FoodItemService : IFoodItemService
     public async Task<bool> DeleteAsync(Guid id)
     {
         var item = await _context.FoodItems.FindAsync(id);
-        if (item == null) return false;
+        if (item == null)
+            return false;
 
         _context.FoodItems.Remove(item);
         await _context.SaveChangesAsync();
@@ -87,13 +86,24 @@ public class FoodItemService : IFoodItemService
         // 2. Decompose Unicode + strip diacritic marks (á→a, ñ→n, ü→u, etc.)
         return new string(
             s.Normalize(System.Text.NormalizationForm.FormD)
-             .Where(c => System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c)
-                         != System.Globalization.UnicodeCategory.NonSpacingMark)
-             .ToArray());
+                .Where(c =>
+                    System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c)
+                    != System.Globalization.UnicodeCategory.NonSpacingMark
+                )
+                .ToArray()
+        );
     }
 
-    private static FoodItemDto ToDto(FoodItem f) => new(
-        f.Id, f.Name, f.KcalPer100g, f.ProteinPer100g,
-        f.CarbsPer100g, f.FatPer100g, f.CreatedByUserId,
-        f.CreatedAt, f.UpdatedAt);
+    private static FoodItemDto ToDto(FoodItem f) =>
+        new(
+            f.Id,
+            f.Name,
+            f.KcalPer100g,
+            f.ProteinPer100g,
+            f.CarbsPer100g,
+            f.FatPer100g,
+            f.CreatedByUserId,
+            f.CreatedAt,
+            f.UpdatedAt
+        );
 }

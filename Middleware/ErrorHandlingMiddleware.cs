@@ -1,7 +1,7 @@
-using Microsoft.Data.Sqlite;
-using Microsoft.EntityFrameworkCore;
 using System.Net;
 using System.Text.Json;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 
 namespace Household.Api.Middleware;
 
@@ -35,34 +35,38 @@ public class ErrorHandlingMiddleware
 
         var (statusCode, message, details) = exception switch
         {
-            DbUpdateException { InnerException: SqliteException sqEx } =>
-                sqEx.SqliteErrorCode == 19
-                    ? ((int)HttpStatusCode.Conflict, "Conflict: duplicate or constraint violation", sqEx.Message)
-                    : ((int)HttpStatusCode.BadRequest, "Database error", sqEx.Message),
+            DbUpdateException { InnerException: SqliteException sqEx } => sqEx.SqliteErrorCode == 19
+                ? ((int)HttpStatusCode.Conflict, "Conflict: duplicate or constraint violation", sqEx.Message)
+                : ((int)HttpStatusCode.BadRequest, "Database error", sqEx.Message),
 
-            DbUpdateException dbEx =>
-                ((int)HttpStatusCode.BadRequest, "Error saving data", dbEx.InnerException?.Message ?? dbEx.Message),
+            DbUpdateException dbEx => (
+                (int)HttpStatusCode.BadRequest,
+                "Error saving data",
+                dbEx.InnerException?.Message ?? dbEx.Message
+            ),
 
-            ArgumentException argEx =>
-                ((int)HttpStatusCode.BadRequest, "Invalid data", argEx.Message),
+            ArgumentException argEx => ((int)HttpStatusCode.BadRequest, "Invalid data", argEx.Message),
 
-            UnauthorizedAccessException uaEx =>
-                ((int)HttpStatusCode.Forbidden, "Access denied", uaEx.Message),
+            UnauthorizedAccessException uaEx => ((int)HttpStatusCode.Forbidden, "Access denied", uaEx.Message),
 
-            KeyNotFoundException knfEx =>
-                ((int)HttpStatusCode.NotFound, "Resource not found", knfEx.Message),
+            KeyNotFoundException knfEx => ((int)HttpStatusCode.NotFound, "Resource not found", knfEx.Message),
 
-            _ =>
-                ((int)HttpStatusCode.InternalServerError, "An unexpected error occurred", null)
+            _ => ((int)HttpStatusCode.InternalServerError, "An unexpected error occurred", null),
         };
 
         context.Response.StatusCode = statusCode;
-        var payload = JsonSerializer.Serialize(new
-        {
-            statusCode,
-            message,
-            details
-        }, new JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull });
+        var payload = JsonSerializer.Serialize(
+            new
+            {
+                statusCode,
+                message,
+                details,
+            },
+            new JsonSerializerOptions
+            {
+                DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+            }
+        );
 
         await context.Response.WriteAsync(payload);
     }

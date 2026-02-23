@@ -1,7 +1,7 @@
-using Microsoft.EntityFrameworkCore;
 using Household.Api.Data;
 using Household.Api.DTOs;
 using Household.Api.Models.Home;
+using Microsoft.EntityFrameworkCore;
 
 namespace Household.Api.Services;
 
@@ -18,8 +18,8 @@ public class TaskService : ITaskService
 
     public async Task<List<TaskTemplateDto>> GetAllTemplatesAsync()
     {
-        var templates = await _context.TaskTemplates
-            .Include(tt => tt.Room)
+        var templates = await _context
+            .TaskTemplates.Include(tt => tt.Room)
             .Include(tt => tt.AssignedToUser)
             .OrderBy(tt => tt.Title)
             .ToListAsync();
@@ -29,8 +29,8 @@ public class TaskService : ITaskService
 
     public async Task<TaskTemplateDto?> GetTemplateByIdAsync(Guid id)
     {
-        var tt = await _context.TaskTemplates
-            .Include(t => t.Room)
+        var tt = await _context
+            .TaskTemplates.Include(t => t.Room)
             .Include(t => t.AssignedToUser)
             .FirstOrDefaultAsync(t => t.Id == id);
 
@@ -52,7 +52,7 @@ public class TaskService : ITaskService
             IntervalDays = request.IntervalDays,
             StartDate = request.StartDate,
             CarryOverIfMissed = request.CarryOverIfMissed,
-            IsActive = request.IsActive
+            IsActive = request.IsActive,
         };
 
         _context.TaskTemplates.Add(tt);
@@ -63,7 +63,8 @@ public class TaskService : ITaskService
     public async Task<TaskTemplateDto?> UpdateTemplateAsync(Guid id, UpdateTaskTemplateRequest request)
     {
         var tt = await _context.TaskTemplates.FindAsync(id);
-        if (tt == null) return null;
+        if (tt == null)
+            return null;
 
         tt.Title = request.Title.Trim();
         tt.RoomId = request.RoomId;
@@ -85,7 +86,8 @@ public class TaskService : ITaskService
     public async Task<bool> DeleteTemplateAsync(Guid id)
     {
         var tt = await _context.TaskTemplates.FindAsync(id);
-        if (tt == null) return false;
+        if (tt == null)
+            return false;
 
         _context.TaskTemplates.Remove(tt);
         await _context.SaveChangesAsync();
@@ -99,24 +101,27 @@ public class TaskService : ITaskService
         // Respect TZ env var (Linux/Docker). Falls back to local time if unset or unknown.
         var tzId = Environment.GetEnvironmentVariable("TZ");
         TimeZoneInfo tz;
-        try { tz = string.IsNullOrEmpty(tzId) ? TimeZoneInfo.Local : TimeZoneInfo.FindSystemTimeZoneById(tzId); }
-        catch { tz = TimeZoneInfo.Local; }
+        try
+        {
+            tz = string.IsNullOrEmpty(tzId) ? TimeZoneInfo.Local : TimeZoneInfo.FindSystemTimeZoneById(tzId);
+        }
+        catch
+        {
+            tz = TimeZoneInfo.Local;
+        }
         var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, tz));
 
-        var templates = await _context.TaskTemplates
-            .Include(tt => tt.Room)
+        var templates = await _context
+            .TaskTemplates.Include(tt => tt.Room)
             .Include(tt => tt.AssignedToUser)
             .Where(tt => tt.IsActive)
             .ToListAsync();
 
-        var todayTemplateIds = templates
-            .Where(tt => AppliesToDate(tt, today))
-            .Select(tt => tt.Id)
-            .ToHashSet();
+        var todayTemplateIds = templates.Where(tt => AppliesToDate(tt, today)).Select(tt => tt.Id).ToHashSet();
 
         // Ensure instances exist for today's applicable templates
-        var existingToday = await _context.TaskInstances
-            .Where(ti => ti.DueDate == today && todayTemplateIds.Contains(ti.TaskTemplateId))
+        var existingToday = await _context
+            .TaskInstances.Where(ti => ti.DueDate == today && todayTemplateIds.Contains(ti.TaskTemplateId))
             .Select(ti => ti.TaskTemplateId)
             .ToHashSetAsync();
 
@@ -131,9 +136,10 @@ public class TaskService : ITaskService
                     DueDate = today,
                     TimeOfDaySlot = tt.TimeOfDaySlot,
                     AssignedToUserId = tt.AssignedToUserId,
-                    Status = TaskInstanceStatus.Pending
+                    Status = TaskInstanceStatus.Pending,
                 };
-            }).ToList();
+            })
+            .ToList();
 
         if (toCreate.Count > 0)
         {
@@ -142,49 +148,57 @@ public class TaskService : ITaskService
         }
 
         // Load today instances + overdue pending ones
-        var allInstances = await _context.TaskInstances
-            .Include(ti => ti.TaskTemplate)
+        var allInstances = await _context
+            .TaskInstances.Include(ti => ti.TaskTemplate)
                 .ThenInclude(tt => tt.Room)
             .Include(ti => ti.AssignedToUser)
-            .Where(ti =>
-                (ti.DueDate == today) ||
-                (ti.DueDate < today && ti.Status == TaskInstanceStatus.Pending))
+            .Where(ti => (ti.DueDate == today) || (ti.DueDate < today && ti.Status == TaskInstanceStatus.Pending))
             .ToListAsync();
 
-        var todayInstances = allInstances
-            .Where(ti => ti.DueDate == today)
-            .ToList();
+        var todayInstances = allInstances.Where(ti => ti.DueDate == today).ToList();
 
-        var overdueInstances = allInstances
-            .Where(ti => ti.DueDate < today)
-            .OrderBy(ti => ti.DueDate)
-            .ToList();
+        var overdueInstances = allInstances.Where(ti => ti.DueDate < today).OrderBy(ti => ti.DueDate).ToList();
 
         return new TodayTasksResponse(
             Date: today,
-            Morning: todayInstances.Where(ti => ti.TimeOfDaySlot == TimeOfDaySlot.Morning).Select(ti => ToInstanceDto(ti, today)).ToList(),
-            Night: todayInstances.Where(ti => ti.TimeOfDaySlot == TimeOfDaySlot.Night).Select(ti => ToInstanceDto(ti, today)).ToList(),
-            Anytime: todayInstances.Where(ti => ti.TimeOfDaySlot == TimeOfDaySlot.Anytime).Select(ti => ToInstanceDto(ti, today)).ToList(),
+            Morning: todayInstances
+                .Where(ti => ti.TimeOfDaySlot == TimeOfDaySlot.Morning)
+                .Select(ti => ToInstanceDto(ti, today))
+                .ToList(),
+            Night: todayInstances
+                .Where(ti => ti.TimeOfDaySlot == TimeOfDaySlot.Night)
+                .Select(ti => ToInstanceDto(ti, today))
+                .ToList(),
+            Anytime: todayInstances
+                .Where(ti => ti.TimeOfDaySlot == TimeOfDaySlot.Anytime)
+                .Select(ti => ToInstanceDto(ti, today))
+                .ToList(),
             Overdue: overdueInstances.Select(ti => ToInstanceDto(ti, today)).ToList()
         );
     }
 
-    public async Task<TaskInstanceDto?> CompleteTaskInstanceAsync(Guid instanceId, Guid completedByUserId, string? notes)
+    public async Task<TaskInstanceDto?> CompleteTaskInstanceAsync(
+        Guid instanceId,
+        Guid completedByUserId,
+        string? notes
+    )
     {
         var today = DateOnly.FromDateTime(DateTime.Today);
 
-        var instance = await _context.TaskInstances
-            .Include(ti => ti.TaskTemplate)
+        var instance = await _context
+            .TaskInstances.Include(ti => ti.TaskTemplate)
                 .ThenInclude(tt => tt.Room)
             .Include(ti => ti.AssignedToUser)
             .FirstOrDefaultAsync(ti => ti.Id == instanceId);
 
-        if (instance == null) return null;
+        if (instance == null)
+            return null;
 
         instance.Status = TaskInstanceStatus.Completed;
         instance.CompletedAt = DateTime.UtcNow;
         instance.CompletedByUserId = completedByUserId;
-        if (notes != null) instance.Notes = notes;
+        if (notes != null)
+            instance.Notes = notes;
 
         await _context.SaveChangesAsync();
         return ToInstanceDto(instance, today);
@@ -194,60 +208,64 @@ public class TaskService : ITaskService
 
     private static bool AppliesToDate(TaskTemplate tt, DateOnly date)
     {
-        if (date < tt.StartDate) return false;
+        if (date < tt.StartDate)
+            return false;
 
         return tt.ScheduleType switch
         {
             ScheduleType.Daily => true,
 
-            ScheduleType.Weekly when tt.DaysOfWeekMask.HasValue =>
-                (tt.DaysOfWeekMask.Value & (1 << (int)date.DayOfWeek)) != 0,
+            ScheduleType.Weekly when tt.DaysOfWeekMask.HasValue => (
+                tt.DaysOfWeekMask.Value & (1 << (int)date.DayOfWeek)
+            ) != 0,
 
-            ScheduleType.Monthly when tt.DayOfMonth.HasValue =>
-                date.Day == tt.DayOfMonth.Value,
+            ScheduleType.Monthly when tt.DayOfMonth.HasValue => date.Day == tt.DayOfMonth.Value,
 
-            ScheduleType.IntervalDays when tt.IntervalDays.HasValue =>
-                (date.DayNumber - tt.StartDate.DayNumber) % tt.IntervalDays.Value == 0,
+            ScheduleType.IntervalDays when tt.IntervalDays.HasValue => (date.DayNumber - tt.StartDate.DayNumber)
+                % tt.IntervalDays.Value
+                == 0,
 
-            _ => false
+            _ => false,
         };
     }
 
     // ── Mapping ───────────────────────────────────────────────────────────────
 
-    private static TaskTemplateDto ToTemplateDto(TaskTemplate tt) => new(
-        Id: tt.Id,
-        Title: tt.Title,
-        RoomId: tt.RoomId,
-        RoomName: tt.Room?.Name,
-        Description: tt.Description,
-        AssignedToUserId: tt.AssignedToUserId,
-        AssignedToUserName: tt.AssignedToUser?.UserName,
-        IsActive: tt.IsActive,
-        ScheduleType: tt.ScheduleType,
-        TimeOfDaySlot: tt.TimeOfDaySlot,
-        DaysOfWeekMask: tt.DaysOfWeekMask,
-        DayOfMonth: tt.DayOfMonth,
-        IntervalDays: tt.IntervalDays,
-        StartDate: tt.StartDate,
-        CarryOverIfMissed: tt.CarryOverIfMissed,
-        CreatedAt: tt.CreatedAt,
-        UpdatedAt: tt.UpdatedAt
-    );
+    private static TaskTemplateDto ToTemplateDto(TaskTemplate tt) =>
+        new(
+            Id: tt.Id,
+            Title: tt.Title,
+            RoomId: tt.RoomId,
+            RoomName: tt.Room?.Name,
+            Description: tt.Description,
+            AssignedToUserId: tt.AssignedToUserId,
+            AssignedToUserName: tt.AssignedToUser?.UserName,
+            IsActive: tt.IsActive,
+            ScheduleType: tt.ScheduleType,
+            TimeOfDaySlot: tt.TimeOfDaySlot,
+            DaysOfWeekMask: tt.DaysOfWeekMask,
+            DayOfMonth: tt.DayOfMonth,
+            IntervalDays: tt.IntervalDays,
+            StartDate: tt.StartDate,
+            CarryOverIfMissed: tt.CarryOverIfMissed,
+            CreatedAt: tt.CreatedAt,
+            UpdatedAt: tt.UpdatedAt
+        );
 
-    private static TaskInstanceDto ToInstanceDto(TaskInstance ti, DateOnly today) => new(
-        Id: ti.Id,
-        TaskTemplateId: ti.TaskTemplateId,
-        TaskTitle: ti.TaskTemplate?.Title ?? string.Empty,
-        RoomName: ti.TaskTemplate?.Room?.Name,
-        DueDate: ti.DueDate,
-        TimeOfDaySlot: ti.TimeOfDaySlot,
-        AssignedToUserId: ti.AssignedToUserId,
-        AssignedToUserName: ti.AssignedToUser?.UserName,
-        Status: ti.Status,
-        CompletedAt: ti.CompletedAt,
-        CompletedByUserId: ti.CompletedByUserId,
-        Notes: ti.Notes,
-        IsOverdue: ti.DueDate < today && ti.Status == TaskInstanceStatus.Pending
-    );
+    private static TaskInstanceDto ToInstanceDto(TaskInstance ti, DateOnly today) =>
+        new(
+            Id: ti.Id,
+            TaskTemplateId: ti.TaskTemplateId,
+            TaskTitle: ti.TaskTemplate?.Title ?? string.Empty,
+            RoomName: ti.TaskTemplate?.Room?.Name,
+            DueDate: ti.DueDate,
+            TimeOfDaySlot: ti.TimeOfDaySlot,
+            AssignedToUserId: ti.AssignedToUserId,
+            AssignedToUserName: ti.AssignedToUser?.UserName,
+            Status: ti.Status,
+            CompletedAt: ti.CompletedAt,
+            CompletedByUserId: ti.CompletedByUserId,
+            Notes: ti.Notes,
+            IsOverdue: ti.DueDate < today && ti.Status == TaskInstanceStatus.Pending
+        );
 }

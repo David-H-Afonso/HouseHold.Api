@@ -2,14 +2,14 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Options;
-using Microsoft.IdentityModel.Tokens;
+using BCrypt.Net;
 using Household.Api.Configuration;
 using Household.Api.Data;
 using Household.Api.DTOs;
 using Household.Api.Models.Auth;
-using BCrypt.Net;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.Tokens;
 
 namespace Household.Api.Services;
 
@@ -30,8 +30,7 @@ public class AuthService : IAuthService
 
     public async Task<LoginResponse?> LoginAsync(string email, string password, string? userAgent, string? deviceName)
     {
-        var user = await _context.Users
-            .FirstOrDefaultAsync(u => u.Email.ToLower() == email.ToLower() && u.IsActive);
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.Email.ToLower() == email.ToLower() && u.IsActive);
 
         if (user == null || !VerifyPassword(password, user.PasswordHash))
             return null;
@@ -56,8 +55,8 @@ public class AuthService : IAuthService
     {
         var tokenHash = HashToken(rawRefreshToken);
 
-        var existing = await _context.RefreshTokens
-            .Include(rt => rt.User)
+        var existing = await _context
+            .RefreshTokens.Include(rt => rt.User)
             .FirstOrDefaultAsync(rt => rt.TokenHash == tokenHash);
 
         if (existing == null)
@@ -68,9 +67,10 @@ public class AuthService : IAuthService
         {
             _logger.LogWarning(
                 "Refresh token reuse detected for user {UserId}. Revoking all active tokens.",
-                existing.UserId);
-            var allActive = await _context.RefreshTokens
-                .Where(rt => rt.UserId == existing.UserId && rt.RevokedAt == null)
+                existing.UserId
+            );
+            var allActive = await _context
+                .RefreshTokens.Where(rt => rt.UserId == existing.UserId && rt.RevokedAt == null)
                 .ToListAsync();
             foreach (var t in allActive)
                 t.RevokedAt = DateTime.UtcNow;
@@ -108,7 +108,8 @@ public class AuthService : IAuthService
         var tokenHash = HashToken(rawRefreshToken);
         var token = await _context.RefreshTokens.FirstOrDefaultAsync(rt => rt.TokenHash == tokenHash);
 
-        if (token == null) return false;
+        if (token == null)
+            return false;
 
         token.RevokedAt = DateTime.UtcNow;
         await _context.SaveChangesAsync();
@@ -119,8 +120,8 @@ public class AuthService : IAuthService
 
     public async Task<int> LogoutAllAsync(Guid userId)
     {
-        var tokens = await _context.RefreshTokens
-            .Where(rt => rt.UserId == userId && rt.RevokedAt == null)
+        var tokens = await _context
+            .RefreshTokens.Where(rt => rt.UserId == userId && rt.RevokedAt == null)
             .ToListAsync();
         foreach (var t in tokens)
             t.RevokedAt = DateTime.UtcNow;
@@ -141,7 +142,7 @@ public class AuthService : IAuthService
             UserName = userName,
             PasswordHash = HashPassword(password),
             IsAdmin = isAdmin,
-            IsActive = true
+            IsActive = true,
         };
 
         _context.Users.Add(user);
@@ -151,11 +152,9 @@ public class AuthService : IAuthService
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    public string HashPassword(string password)
-        => BCrypt.Net.BCrypt.HashPassword(password, workFactor: 12);
+    public string HashPassword(string password) => BCrypt.Net.BCrypt.HashPassword(password, workFactor: 12);
 
-    public bool VerifyPassword(string password, string hash)
-        => BCrypt.Net.BCrypt.Verify(password, hash);
+    public bool VerifyPassword(string password, string hash) => BCrypt.Net.BCrypt.Verify(password, hash);
 
     private (string accessToken, DateTime expiresAt) GenerateAccessToken(User user)
     {
@@ -167,7 +166,7 @@ public class AuthService : IAuthService
         {
             new(ClaimTypes.NameIdentifier, user.Id.ToString()),
             new(ClaimTypes.Email, user.Email),
-            new(ClaimTypes.Name, user.UserName)
+            new(ClaimTypes.Name, user.UserName),
         };
         if (user.IsAdmin)
             claims.Add(new Claim(ClaimTypes.Role, "Admin"));
@@ -180,7 +179,8 @@ public class AuthService : IAuthService
             Audience = _jwtSettings.Audience,
             SigningCredentials = new SigningCredentials(
                 new SymmetricSecurityKey(key),
-                SecurityAlgorithms.HmacSha256Signature)
+                SecurityAlgorithms.HmacSha256Signature
+            ),
         };
 
         var token = tokenHandler.CreateToken(tokenDescriptor);
@@ -188,7 +188,10 @@ public class AuthService : IAuthService
     }
 
     private async Task<(string rawToken, RefreshToken entity)> CreateRefreshTokenAsync(
-        Guid userId, string? userAgent, string? deviceName)
+        Guid userId,
+        string? userAgent,
+        string? deviceName
+    )
     {
         var rawToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
         var tokenHash = HashToken(rawToken);
@@ -199,7 +202,7 @@ public class AuthService : IAuthService
             TokenHash = tokenHash,
             ExpiresAt = DateTime.UtcNow.AddDays(_jwtSettings.RefreshTokenDays),
             UserAgent = userAgent,
-            DeviceName = deviceName
+            DeviceName = deviceName,
         };
 
         _context.RefreshTokens.Add(entity);

@@ -1,8 +1,8 @@
-using Microsoft.EntityFrameworkCore;
 using Household.Api.Data;
 using Household.Api.DTOs;
 using Household.Api.Helpers;
 using Household.Api.Models.Food;
+using Microsoft.EntityFrameworkCore;
 
 namespace Household.Api.Services;
 
@@ -19,18 +19,18 @@ public class MealService : IMealService
 
     public async Task<List<MealEntryDto>> GetAllAsync(Guid userId, DateTime? from, DateTime? to)
     {
-        var query = _context.MealEntries
-            .Include(me => me.Items)
+        var query = _context
+            .MealEntries.Include(me => me.Items)
                 .ThenInclude(i => i.FoodItem)
             .Include(me => me.DishTemplate)
             .Where(me => me.UserId == userId);
 
-        if (from.HasValue) query = query.Where(me => me.EatenAt == null || me.EatenAt >= from);
-        if (to.HasValue) query = query.Where(me => me.EatenAt == null || me.EatenAt <= to);
+        if (from.HasValue)
+            query = query.Where(me => me.EatenAt == null || me.EatenAt >= from);
+        if (to.HasValue)
+            query = query.Where(me => me.EatenAt == null || me.EatenAt <= to);
 
-        var entries = await query
-            .OrderByDescending(me => me.EatenAt ?? me.CreatedAt)
-            .ToListAsync();
+        var entries = await query.OrderByDescending(me => me.EatenAt ?? me.CreatedAt).ToListAsync();
 
         return entries.Select(ToDto).ToList();
     }
@@ -51,16 +51,14 @@ public class MealService : IMealService
             DishTemplateId = request.DishTemplateId,
             Status = request.Status,
             Notes = request.Notes,
-            MealType = ResolveMealType(request.EatenAt, request.Status)
+            MealType = ResolveMealType(request.EatenAt, request.Status),
         };
 
         if (request.Items != null)
         {
-            entry.Items = request.Items.Select(i => new MealEntryItem
-            {
-                FoodItemId = i.FoodItemId,
-                Grams = i.Grams
-            }).ToList();
+            entry.Items = request
+                .Items.Select(i => new MealEntryItem { FoodItemId = i.FoodItemId, Grams = i.Grams })
+                .ToList();
         }
 
         _context.MealEntries.Add(entry);
@@ -71,11 +69,12 @@ public class MealService : IMealService
 
     public async Task<MealEntryDto?> UpdateAsync(Guid id, UpdateMealEntryRequest request, Guid userId)
     {
-        var entry = await _context.MealEntries
-            .Include(me => me.Items)
+        var entry = await _context
+            .MealEntries.Include(me => me.Items)
             .FirstOrDefaultAsync(me => me.Id == id && me.UserId == userId);
 
-        if (entry == null) return null;
+        if (entry == null)
+            return null;
 
         var eatenAtChanged = entry.EatenAt != request.EatenAt;
         var statusChanged = entry.Status != request.Status;
@@ -95,12 +94,14 @@ public class MealService : IMealService
         if (request.Items != null)
         {
             _context.MealEntryItems.RemoveRange(entry.Items);
-            entry.Items = request.Items.Select(i => new MealEntryItem
-            {
-                MealEntryId = entry.Id,
-                FoodItemId = i.FoodItemId,
-                Grams = i.Grams
-            }).ToList();
+            entry.Items = request
+                .Items.Select(i => new MealEntryItem
+                {
+                    MealEntryId = entry.Id,
+                    FoodItemId = i.FoodItemId,
+                    Grams = i.Grams,
+                })
+                .ToList();
         }
 
         await _context.SaveChangesAsync();
@@ -109,10 +110,10 @@ public class MealService : IMealService
 
     public async Task<bool> DeleteAsync(Guid id, Guid userId)
     {
-        var entry = await _context.MealEntries
-            .FirstOrDefaultAsync(me => me.Id == id && me.UserId == userId);
+        var entry = await _context.MealEntries.FirstOrDefaultAsync(me => me.Id == id && me.UserId == userId);
 
-        if (entry == null) return false;
+        if (entry == null)
+            return false;
 
         _context.MealEntries.Remove(entry);
         await _context.SaveChangesAsync();
@@ -130,24 +131,26 @@ public class MealService : IMealService
     }
 
     private async Task<MealEntry?> LoadEntryAsync(Guid id) =>
-        await _context.MealEntries
-            .Include(me => me.Items)
+        await _context
+            .MealEntries.Include(me => me.Items)
                 .ThenInclude(i => i.FoodItem)
             .Include(me => me.DishTemplate)
             .FirstOrDefaultAsync(me => me.Id == id);
 
     private static MealEntryDto ToDto(MealEntry me)
     {
-        var items = me.Items.Select(i => new MealEntryItemDto(
-            Id: i.Id,
-            FoodItemId: i.FoodItemId,
-            FoodItemName: i.FoodItem?.Name ?? string.Empty,
-            Grams: i.Grams,
-            KcalPer100g: i.FoodItem?.KcalPer100g ?? 0,
-            ProteinPer100g: i.FoodItem?.ProteinPer100g ?? 0,
-            CarbsPer100g: i.FoodItem?.CarbsPer100g ?? 0,
-            FatPer100g: i.FoodItem?.FatPer100g ?? 0
-        )).ToList();
+        var items = me
+            .Items.Select(i => new MealEntryItemDto(
+                Id: i.Id,
+                FoodItemId: i.FoodItemId,
+                FoodItemName: i.FoodItem?.Name ?? string.Empty,
+                Grams: i.Grams,
+                KcalPer100g: i.FoodItem?.KcalPer100g ?? 0,
+                ProteinPer100g: i.FoodItem?.ProteinPer100g ?? 0,
+                CarbsPer100g: i.FoodItem?.CarbsPer100g ?? 0,
+                FatPer100g: i.FoodItem?.FatPer100g ?? 0
+            ))
+            .ToList();
 
         decimal totalKcal = items.Sum(i => i.Grams / 100m * i.KcalPer100g);
         decimal totalProtein = items.Sum(i => i.Grams / 100m * i.ProteinPer100g);

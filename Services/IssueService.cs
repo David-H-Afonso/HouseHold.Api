@@ -1,7 +1,7 @@
-using Microsoft.EntityFrameworkCore;
 using Household.Api.Data;
 using Household.Api.DTOs;
 using Household.Api.Models.Home;
+using Microsoft.EntityFrameworkCore;
 
 namespace Household.Api.Services;
 
@@ -16,8 +16,8 @@ public class IssueService : IIssueService
 
     public async Task<List<HomeIssueDto>> GetAllAsync()
     {
-        var issues = await _context.HomeIssues
-            .Include(hi => hi.Room)
+        var issues = await _context
+            .HomeIssues.Include(hi => hi.Room)
             .Include(hi => hi.CreatedByUser)
             .OrderByDescending(hi => hi.Priority)
             .ThenBy(hi => hi.CreatedAt)
@@ -28,8 +28,8 @@ public class IssueService : IIssueService
 
     public async Task<HomeIssueDto?> GetByIdAsync(Guid id)
     {
-        var hi = await _context.HomeIssues
-            .Include(h => h.Room)
+        var hi = await _context
+            .HomeIssues.Include(h => h.Room)
             .Include(h => h.CreatedByUser)
             .FirstOrDefaultAsync(h => h.Id == id);
 
@@ -45,7 +45,7 @@ public class IssueService : IIssueService
             Description = request.Description,
             Status = request.Status,
             Priority = request.Priority,
-            CreatedByUserId = createdByUserId
+            CreatedByUserId = createdByUserId,
         };
 
         _context.HomeIssues.Add(issue);
@@ -57,7 +57,8 @@ public class IssueService : IIssueService
     public async Task<HomeIssueDto?> UpdateAsync(Guid id, UpdateHomeIssueRequest request)
     {
         var issue = await _context.HomeIssues.FindAsync(id);
-        if (issue == null) return null;
+        if (issue == null)
+            return null;
 
         issue.Title = request.Title.Trim();
         issue.RoomId = request.RoomId;
@@ -81,24 +82,26 @@ public class IssueService : IIssueService
     public async Task<bool> DeleteAsync(Guid id)
     {
         var issue = await _context.HomeIssues.FindAsync(id);
-        if (issue == null) return false;
+        if (issue == null)
+            return false;
 
         _context.HomeIssues.Remove(issue);
         await _context.SaveChangesAsync();
         return true;
     }
 
-    private static HomeIssueDto ToDto(HomeIssue hi) => new(
-        Id: hi.Id,
-        Title: hi.Title,
-        RoomId: hi.RoomId,
-        RoomName: hi.Room?.Name,
-        Description: hi.Description,
-        Status: hi.Status,
-        Priority: hi.Priority,
-        CreatedByUserId: hi.CreatedByUserId,
-        CreatedByUserName: hi.CreatedByUser?.UserName ?? string.Empty,
-        CreatedAt: hi.CreatedAt,
-        ResolvedAt: hi.ResolvedAt
-    );
+    private static HomeIssueDto ToDto(HomeIssue hi) =>
+        new(
+            Id: hi.Id,
+            Title: hi.Title,
+            RoomId: hi.RoomId,
+            RoomName: hi.Room?.Name,
+            Description: hi.Description,
+            Status: hi.Status,
+            Priority: hi.Priority,
+            CreatedByUserId: hi.CreatedByUserId,
+            CreatedByUserName: hi.CreatedByUser?.UserName ?? string.Empty,
+            CreatedAt: hi.CreatedAt,
+            ResolvedAt: hi.ResolvedAt
+        );
 }
