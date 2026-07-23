@@ -254,8 +254,8 @@ public class GamesDatabaseClient : IGamesDatabaseClient
             game.StatusId,
             game.StatusName,
             game.PlatformName,
-            game.Logo,
-            game.Cover,
+            BuildAssetUrl(game.Logo),
+            BuildAssetUrl(game.Cover),
             game.Grade,
             game.Score,
             game.Started,
@@ -264,6 +264,19 @@ public class GamesDatabaseClient : IGamesDatabaseClient
             game.SteamPlaytimeForever,
             BuildOpenUrl(game.Id)
         );
+
+    private string? BuildAssetUrl(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return null;
+        if (Uri.TryCreate(path, UriKind.Absolute, out var absolute))
+            return absolute.Scheme is "http" or "https" && string.IsNullOrEmpty(absolute.UserInfo)
+                ? absolute.ToString()
+                : null;
+
+        var openUrl = _settings.OpenUrl?.TrimEnd('/');
+        return string.IsNullOrWhiteSpace(openUrl) ? null : $"{openUrl}/{path.TrimStart('/')}";
+    }
 
     private sealed class PagedGamesResponse
     {

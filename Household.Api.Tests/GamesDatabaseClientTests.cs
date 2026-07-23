@@ -15,7 +15,7 @@ public class GamesDatabaseClientTests
         var userId = Guid.NewGuid();
         var handler = new RecordingHandler(
             _ => JsonResponse("""
-                {"data":[{"id":7,"statusId":2,"name":"Test Game","statusName":"Playing"}],"totalCount":1,"page":1,"pageSize":24,"totalPages":1}
+                {"data":[{"id":7,"statusId":2,"name":"Test Game","statusName":"Playing","cover":"/game-images/test.jpg"}],"totalCount":1,"page":1,"pageSize":24,"totalPages":1}
                 """)
         );
         var access = new StubAccessService("gdi_user_token");
@@ -25,6 +25,7 @@ public class GamesDatabaseClientTests
 
         Assert.Single(result.Items);
         Assert.Equal("Test Game", result.Items[0].Name);
+        Assert.Equal("https://games.example/game-images/test.jpg", result.Items[0].Cover);
         Assert.Equal(userId, access.Requests.Single().UserId);
         Assert.Equal("games.read", access.Requests.Single().Scope);
         Assert.Equal("Bearer", handler.Requests.Single().Authorization?.Scheme);
