@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Household.Api.Application.Interfaces;
 using Household.Api.Application.Services;
 using Household.Api.Configuration;
 using Household.Api.Data;
@@ -80,6 +81,78 @@ public class HouseholdConsumerConnectionServiceTests
         Assert.DoesNotContain("token", json, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task GetAccess_ReturnsOnlyTheCurrentUsersTokenAndEnforcesScope()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
+        await using var db = new AppDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+
+        var userA = CreateUser("a@example.test");
+        var userB = CreateUser("b@example.test");
+        var dataProtection = new EphemeralDataProtectionProvider();
+        var tokenProtector = dataProtection.CreateProtector("Household.ConsumerConnections.Tokens.v1");
+        db.Users.AddRange(userA, userB);
+        db.HouseholdConsumerConnections.Add(
+            new HouseholdConsumerConnection
+            {
+                UserId = userA.Id,
+                Provider = "games-database",
+                ProtectedAccessToken = tokenProtector.Protect("gdi_user_a"),
+                AccessTokenExpiresAt = DateTime.UtcNow.AddMinutes(10),
+                ProtectedRefreshToken = tokenProtector.Protect("gdr_user_a"),
+                RefreshTokenExpiresAt = DateTime.UtcNow.AddDays(10),
+                SourceConnectionId = Guid.NewGuid().ToString(),
+                AccountId = "account-a",
+                AccountDisplayName = "Account A",
+                GrantedScopes = "profile.read games.read",
+                Status = HouseholdConnectionStatus.Connected,
+                ConnectedAt = DateTime.UtcNow,
+            }
+        );
+        await db.SaveChangesAsync();
+
+        var service = new HouseholdConsumerConnectionService(
+            db,
+            CreateRegistry(),
+            new HouseholdConnectionCoordinator(),
+            new TestHttpClientFactory(),
+            dataProtection
+        );
+
+        var allowed = await service.GetAccessAsync(
+            userA.Id,
+            "games-database",
+            "games.read",
+            false,
+            null,
+            CancellationToken.None
+        );
+        var otherUser = await service.GetAccessAsync(
+            userB.Id,
+            "games-database",
+            "games.read",
+            false,
+            null,
+            CancellationToken.None
+        );
+        var missingScope = await service.GetAccessAsync(
+            userA.Id,
+            "games-database",
+            "games.status.write",
+            false,
+            null,
+            CancellationToken.None
+        );
+
+        Assert.Equal(HouseholdProviderAccessStatus.Success, allowed.Status);
+        Assert.Equal("gdi_user_a", allowed.AccessToken);
+        Assert.Equal(HouseholdProviderAccessStatus.ConnectionRequired, otherUser.Status);
+        Assert.Equal(HouseholdProviderAccessStatus.MissingScope, missingScope.Status);
+    }
+
     private static User CreateUser(string email) =>
         new() { Email = email, UserName = email, PasswordHash = "test", IsActive = true };
 
@@ -113,6 +186,8 @@ public class HouseholdConsumerConnectionServiceTests
                     ApiPublicUrl = "https://api.household.example",
                     DoItBaseUrl = "https://doit-api.example",
                     DoItOpenUrl = "https://doit.example",
+                    GamesDatabaseBaseUrl = "https://games-api.example",
+                    GamesDatabaseOpenUrl = "https://games.example",
                 }
             )
         );

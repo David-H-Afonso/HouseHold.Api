@@ -5,6 +5,7 @@ namespace Household.Api.Application.Interfaces;
 public interface IGamesDatabaseClient
 {
     Task<GamesModuleListDto> GetGamesAsync(
+        Guid userId,
         string? search,
         int? statusId,
         int page,
@@ -12,10 +13,8 @@ public interface IGamesDatabaseClient
         CancellationToken cancellationToken
     );
 
-    Task<GameModuleItemDto?> GetGameAsync(int id, CancellationToken cancellationToken);
-    Task<GameModuleItemDto?> UpdateStatusAsync(int id, int statusId, CancellationToken cancellationToken);
-    Task<IReadOnlyList<GameStatusOptionDto>> GetStatusesAsync(CancellationToken cancellationToken);
-    Task<IReadOnlyList<SteamSearchResultDto>> SearchSteamAsync(string query, CancellationToken cancellationToken);
-    Task<object?> AddSteamGameAsync(AddSteamGameRequest request, CancellationToken cancellationToken);
-    Task<GamesSummaryDto> GetSummaryAsync(CancellationToken cancellationToken);
+    Task<GameModuleItemDto?> GetGameAsync(Guid userId, int id, CancellationToken cancellationToken);
+    Task<GameModuleItemDto?> UpdateStatusAsync(Guid userId, int id, int statusId, CancellationToken cancellationToken);
+    Task<IReadOnlyList<GameStatusOptionDto>> GetStatusesAsync(Guid userId, CancellationToken cancellationToken);
+    Task<GamesSummaryDto> GetSummaryAsync(Guid userId, CancellationToken cancellationToken);
 }

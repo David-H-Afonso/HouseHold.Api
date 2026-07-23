@@ -337,6 +337,9 @@ builder.Services.AddHttpClient<IGamesDatabaseClient, GamesDatabaseClient>();
 builder.Services.AddSingleton<HouseholdProviderRegistry>();
 builder.Services.AddSingleton<HouseholdConnectionCoordinator>();
 builder.Services.AddScoped<HouseholdConsumerConnectionService>();
+builder.Services.AddScoped<IHouseholdProviderAccessService>(services =>
+    services.GetRequiredService<HouseholdConsumerConnectionService>()
+);
 builder.Services.AddHttpClient("HouseholdProviders", client => client.Timeout = TimeSpan.FromSeconds(15));
 
 builder.Services.AddHttpContextAccessor();

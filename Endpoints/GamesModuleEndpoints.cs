@@ -1,5 +1,6 @@
 using Household.Api.Application.Interfaces;
 using Household.Api.DTOs;
+using Household.Api.Helpers;
 
 namespace Household.Api.Endpoints;
 
@@ -16,39 +17,38 @@ public static class GamesModuleEndpoints
                 int? statusId,
                 int? page,
                 int? pageSize,
+                HttpContext context,
                 IGamesDatabaseClient client,
                 CancellationToken ct
             ) =>
-                Results.Ok(
-                    await client.GetGamesAsync(search, statusId, page ?? 1, pageSize ?? 24, ct)
-                )
+            {
+                var userId = context.GetUserId();
+                return userId is null
+                    ? Results.Unauthorized()
+                    : Results.Ok(await client.GetGamesAsync(userId.Value, search, statusId, page ?? 1, pageSize ?? 24, ct));
+            }
         );
 
-        group.MapGet("/summary", async (IGamesDatabaseClient client, CancellationToken ct) =>
-            Results.Ok(await client.GetSummaryAsync(ct))
-        );
+        group.MapGet("/summary", async (HttpContext context, IGamesDatabaseClient client, CancellationToken ct) =>
+        {
+            var userId = context.GetUserId();
+            return userId is null ? Results.Unauthorized() : Results.Ok(await client.GetSummaryAsync(userId.Value, ct));
+        });
 
-        group.MapGet("/statuses", async (IGamesDatabaseClient client, CancellationToken ct) =>
-            Results.Ok(await client.GetStatusesAsync(ct))
-        );
-
-        group.MapGet(
-            "/steam/search",
-            async (string q, IGamesDatabaseClient client, CancellationToken ct) =>
-                Results.Ok(await client.SearchSteamAsync(q, ct))
-        );
-
-        group.MapPost(
-            "/steam/add",
-            async (AddSteamGameRequest request, IGamesDatabaseClient client, CancellationToken ct) =>
-                Results.Ok(await client.AddSteamGameAsync(request, ct))
-        );
+        group.MapGet("/statuses", async (HttpContext context, IGamesDatabaseClient client, CancellationToken ct) =>
+        {
+            var userId = context.GetUserId();
+            return userId is null ? Results.Unauthorized() : Results.Ok(await client.GetStatusesAsync(userId.Value, ct));
+        });
 
         group.MapGet(
             "/{id:int}",
-            async (int id, IGamesDatabaseClient client, CancellationToken ct) =>
+            async (int id, HttpContext context, IGamesDatabaseClient client, CancellationToken ct) =>
             {
-                var game = await client.GetGameAsync(id, ct);
+                var userId = context.GetUserId();
+                if (userId is null)
+                    return Results.Unauthorized();
+                var game = await client.GetGameAsync(userId.Value, id, ct);
                 return game is null ? Results.NotFound() : Results.Ok(game);
             }
         );
@@ -58,11 +58,15 @@ public static class GamesModuleEndpoints
             async (
                 int id,
                 UpdateGameStatusRequest request,
+                HttpContext context,
                 IGamesDatabaseClient client,
                 CancellationToken ct
             ) =>
             {
-                var game = await client.UpdateStatusAsync(id, request.StatusId, ct);
+                var userId = context.GetUserId();
+                if (userId is null)
+                    return Results.Unauthorized();
+                var game = await client.UpdateStatusAsync(userId.Value, id, request.StatusId, ct);
                 return game is null ? Results.NotFound() : Results.Ok(game);
             }
         );

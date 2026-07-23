@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.Json;
+using Household.Api.Application.Exceptions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 
@@ -35,6 +36,11 @@ public class ErrorHandlingMiddleware
 
         var (statusCode, message, details) = exception switch
         {
+            IntegrationGatewayException gatewayException => (
+                (int)gatewayException.StatusCode,
+                gatewayException.Message,
+                null
+            ),
             DbUpdateException { InnerException: SqliteException sqEx } => sqEx.SqliteErrorCode == 19
                 ? ((int)HttpStatusCode.Conflict, "Conflict: duplicate or constraint violation", null)
                 : ((int)HttpStatusCode.BadRequest, "Database error", null),

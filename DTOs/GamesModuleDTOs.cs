@@ -29,17 +29,6 @@ public record GameStatusOptionDto(int Id, string Name, string Color, string Stat
 
 public record UpdateGameStatusRequest(int StatusId);
 
-public record SteamSearchResultDto(
-    int AppId,
-    string Name,
-    string? CoverUrl,
-    string? LogoUrl,
-    string? Price,
-    int? Metascore
-);
-
-public record AddSteamGameRequest(int AppId, string? LogoUrl, string? CoverUrl);
-
 public record GamesSummaryDto(
     int TotalCount,
     IReadOnlyList<GameStatusOptionDto> Statuses,

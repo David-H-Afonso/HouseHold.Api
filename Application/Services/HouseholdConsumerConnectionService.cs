@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text.Json;
+using Household.Api.Application.Interfaces;
 using Household.Api.Data;
 using Household.Api.DTOs;
 using Household.Api.Models.Integrations;
@@ -29,7 +30,7 @@ public enum HouseholdDisconnectResult
     UpstreamFailure,
 }
 
-public class HouseholdConsumerConnectionService
+public class HouseholdConsumerConnectionService : IHouseholdProviderAccessService
 {
     private const int MaxProviderResponseBytes = 64 * 1024;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
@@ -286,6 +287,53 @@ public class HouseholdConsumerConnectionService
         connection.LastValidatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(cancellationToken);
         return ToDto(provider, connection);
+    }
+
+    public async Task<HouseholdProviderAccessResult> GetAccessAsync(
+        Guid userId,
+        string providerId,
+        string requiredScope,
+        bool forceRefresh,
+        string? failedTokenVersion,
+        CancellationToken cancellationToken
+    )
+    {
+        if (!_providers.TryGet(providerId, out var provider) || !provider.Configured || provider.BaseUrl is null)
+            return new HouseholdProviderAccessResult(HouseholdProviderAccessStatus.ProviderUnavailable);
+
+        var connection = await _db.HouseholdConsumerConnections.SingleOrDefaultAsync(
+            item => item.UserId == userId && item.Provider == provider.Id,
+            cancellationToken
+        );
+        if (connection is null || connection.Status is HouseholdConnectionStatus.Disconnected or HouseholdConnectionStatus.Expired)
+            return new HouseholdProviderAccessResult(HouseholdProviderAccessStatus.ConnectionRequired);
+
+        var grantedScopes = SplitScopes(connection.GrantedScopes);
+        if (!grantedScopes.Contains(requiredScope))
+            return new HouseholdProviderAccessResult(HouseholdProviderAccessStatus.MissingScope);
+
+        var accessToken = await GetAccessTokenAsync(
+            connection,
+            provider,
+            forceRefresh,
+            failedTokenVersion,
+            cancellationToken
+        );
+        if (accessToken is null)
+        {
+            return new HouseholdProviderAccessResult(
+                connection.Status == HouseholdConnectionStatus.Expired
+                    ? HouseholdProviderAccessStatus.ConnectionRequired
+                    : HouseholdProviderAccessStatus.ProviderUnavailable
+            );
+        }
+
+        return new HouseholdProviderAccessResult(
+            HouseholdProviderAccessStatus.Success,
+            accessToken,
+            provider.BaseUrl,
+            connection.ProtectedAccessToken
+        );
     }
 
     public async Task<HouseholdDisconnectResult> DisconnectAsync(

@@ -1,6 +1,9 @@
+using System.Net;
+using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Household.Api.Application.Exceptions;
 using Household.Api.Application.Interfaces;
 using Household.Api.Configuration;
 using Household.Api.DTOs;
@@ -18,15 +21,22 @@ public class GamesDatabaseClient : IGamesDatabaseClient
 
     private readonly HttpClient _httpClient;
     private readonly GamesDatabaseSettings _settings;
+    private readonly IHouseholdProviderAccessService _connectionAccess;
 
-    public GamesDatabaseClient(HttpClient httpClient, IOptions<GamesDatabaseSettings> settings)
+    public GamesDatabaseClient(
+        HttpClient httpClient,
+        IOptions<GamesDatabaseSettings> settings,
+        IHouseholdProviderAccessService connectionAccess
+    )
     {
         _httpClient = httpClient;
         _settings = settings.Value;
+        _connectionAccess = connectionAccess;
         _httpClient.Timeout = TimeSpan.FromSeconds(Math.Clamp(_settings.TimeoutSeconds, 3, 60));
     }
 
     public async Task<GamesModuleListDto> GetGamesAsync(
+        Guid userId,
         string? search,
         int? statusId,
         int page,
@@ -34,9 +44,6 @@ public class GamesDatabaseClient : IGamesDatabaseClient
         CancellationToken cancellationToken
     )
     {
-        if (!IsConfigured())
-            return new GamesModuleListDto([], 0, page, pageSize, 0);
-
         var query = BuildQuery(
             new Dictionary<string, string?>
             {
@@ -47,7 +54,14 @@ public class GamesDatabaseClient : IGamesDatabaseClient
             }
         );
 
-        var result = await SendAsync<PagedGamesResponse>(HttpMethod.Get, $"/api/games{query}", null, cancellationToken);
+        var result = await SendAsync<PagedGamesResponse>(
+            userId,
+            "games.read",
+            HttpMethod.Get,
+            $"/api/games{query}",
+            null,
+            cancellationToken
+        );
         return new GamesModuleListDto(
             (result?.Data ?? []).Select(ToModuleItem).ToList(),
             result?.TotalCount ?? 0,
@@ -57,34 +71,45 @@ public class GamesDatabaseClient : IGamesDatabaseClient
         );
     }
 
-    public async Task<GameModuleItemDto?> GetGameAsync(int id, CancellationToken cancellationToken)
+    public async Task<GameModuleItemDto?> GetGameAsync(Guid userId, int id, CancellationToken cancellationToken)
     {
-        if (!IsConfigured())
-            return null;
-
-        var game = await SendAsync<GameDto>(HttpMethod.Get, $"/api/games/{id}", null, cancellationToken);
+        var game = await SendAsync<GameDto>(
+            userId,
+            "games.read",
+            HttpMethod.Get,
+            $"/api/games/{id}",
+            null,
+            cancellationToken
+        );
         return game is null ? null : ToModuleItem(game);
     }
 
     public async Task<GameModuleItemDto?> UpdateStatusAsync(
+        Guid userId,
         int id,
         int statusId,
         CancellationToken cancellationToken
     )
     {
-        if (!IsConfigured())
-            return null;
-
-        await SendAsync<object>(HttpMethod.Put, $"/api/games/{id}", new { statusId }, cancellationToken);
-        return await GetGameAsync(id, cancellationToken);
+        var game = await SendAsync<GameDto>(
+            userId,
+            "games.status.write",
+            HttpMethod.Patch,
+            $"/api/games/{id}/status",
+            new { statusId },
+            cancellationToken
+        );
+        return game is null ? null : ToModuleItem(game);
     }
 
-    public async Task<IReadOnlyList<GameStatusOptionDto>> GetStatusesAsync(CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<GameStatusOptionDto>> GetStatusesAsync(
+        Guid userId,
+        CancellationToken cancellationToken
+    )
     {
-        if (!IsConfigured())
-            return [];
-
         var statuses = await SendAsync<List<GameStatusDto>>(
+            userId,
+            "games.read",
             HttpMethod.Get,
             "/api/GameStatus/active",
             null,
@@ -100,90 +125,117 @@ public class GamesDatabaseClient : IGamesDatabaseClient
             .ToList();
     }
 
-    public async Task<IReadOnlyList<SteamSearchResultDto>> SearchSteamAsync(
-        string query,
-        CancellationToken cancellationToken
-    )
+    public async Task<GamesSummaryDto> GetSummaryAsync(Guid userId, CancellationToken cancellationToken)
     {
-        if (!IsConfigured() || string.IsNullOrWhiteSpace(query) || query.Trim().Length < 2)
-            return [];
-
-        var encoded = Uri.EscapeDataString(query.Trim());
-        var results = await SendAsync<List<SteamStoreSearchItemDto>>(
+        var summary = await SendAsync<SourceGamesSummary>(
+            userId,
+            "games.read",
             HttpMethod.Get,
-            $"/api/steam/store/search?q={encoded}",
+            "/api/games/summary",
             null,
             cancellationToken
         );
+        var statuses = await GetStatusesAsync(userId, cancellationToken);
+        var counts = (summary?.ByStatus ?? []).ToDictionary(item => item.StatusName, item => item.Count);
 
-        return (results ?? []).Select(item => new SteamSearchResultDto(
-                item.AppId,
-                item.Name,
-                item.CoverUrl,
-                item.LogoUrl,
-                item.Price,
-                item.Metascore
-            ))
-            .ToList();
-    }
-
-    public async Task<object?> AddSteamGameAsync(AddSteamGameRequest request, CancellationToken cancellationToken)
-    {
-        if (!IsConfigured())
-            return null;
-
-        return await SendAsync<object>(
-            HttpMethod.Post,
-            "/api/steam/store/add",
-            new { request.AppId, request.LogoUrl, request.CoverUrl },
-            cancellationToken
-        );
-    }
-
-    public async Task<GamesSummaryDto> GetSummaryAsync(CancellationToken cancellationToken)
-    {
-        var statuses = await GetStatusesAsync(cancellationToken);
-        var games = await GetGamesAsync(null, null, 1, 100, cancellationToken);
-        var counts = games.Items
-            .GroupBy(game => game.StatusName ?? "Unknown")
-            .ToDictionary(group => group.Key, group => group.Count());
-
-        return new GamesSummaryDto(games.TotalCount, statuses, counts);
+        return new GamesSummaryDto(summary?.TotalGames ?? 0, statuses, counts);
     }
 
     private async Task<T?> SendAsync<T>(
+        Guid userId,
+        string requiredScope,
         HttpMethod method,
         string path,
         object? body,
-        CancellationToken cancellationToken
+        CancellationToken cancellationToken,
+        bool retrying = false,
+        string? failedTokenVersion = null
     )
     {
-        var baseUrl = _settings.BaseUrl?.TrimEnd('/');
-        if (string.IsNullOrWhiteSpace(baseUrl))
-            return default;
+        var access = await _connectionAccess.GetAccessAsync(
+            userId,
+            "games-database",
+            requiredScope,
+            retrying,
+            failedTokenVersion,
+            cancellationToken
+        );
+        if (access.Status != HouseholdProviderAccessStatus.Success || access.AccessToken is null || access.BaseUrl is null)
+            throw ToGatewayException(access.Status);
 
-        using var request = new HttpRequestMessage(method, $"{baseUrl}{path}");
+        using var request = new HttpRequestMessage(method, $"{access.BaseUrl.TrimEnd('/')}{path}");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", access.AccessToken);
         if (body is not null)
         {
             var json = JsonSerializer.Serialize(body, JsonOptions);
             request.Content = new StringContent(json, Encoding.UTF8, "application/json");
         }
 
-        using var response = await _httpClient.SendAsync(request, cancellationToken);
-        response.EnsureSuccessStatusCode();
-        if (response.Content.Headers.ContentLength == 0)
-            return default;
+        HttpResponseMessage response;
+        try
+        {
+            response = await _httpClient.SendAsync(request, cancellationToken);
+        }
+        catch (Exception exception) when (
+            exception is HttpRequestException
+            || (exception is TaskCanceledException && !cancellationToken.IsCancellationRequested)
+        )
+        {
+            throw new IntegrationGatewayException(HttpStatusCode.BadGateway, "Games Database is unavailable.");
+        }
+        using (response)
+        {
+            if (response.StatusCode == HttpStatusCode.Unauthorized && !retrying)
+            {
+                return await SendAsync<T>(
+                    userId,
+                    requiredScope,
+                    method,
+                    path,
+                    body,
+                    cancellationToken,
+                    retrying: true,
+                    failedTokenVersion: access.TokenVersion
+                );
+            }
+            if (response.StatusCode == HttpStatusCode.NotFound)
+                return default;
+            if (response.StatusCode == HttpStatusCode.Forbidden)
+                throw new IntegrationGatewayException(HttpStatusCode.Forbidden, "Games Database denied this operation.");
+            if (response.StatusCode == HttpStatusCode.Unauthorized)
+                throw new IntegrationGatewayException(HttpStatusCode.Conflict, "Reconnect Games Database to continue.");
+            if (!response.IsSuccessStatusCode)
+                throw new IntegrationGatewayException(HttpStatusCode.BadGateway, "Games Database request failed.");
 
-        var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        return await JsonSerializer.DeserializeAsync<T>(stream, JsonOptions, cancellationToken);
+            if (response.Content.Headers.ContentLength == 0)
+                return default;
+
+            try
+            {
+                var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+                return await JsonSerializer.DeserializeAsync<T>(stream, JsonOptions, cancellationToken);
+            }
+            catch (JsonException)
+            {
+                throw new IntegrationGatewayException(HttpStatusCode.BadGateway, "Games Database returned an invalid response.");
+            }
+        }
     }
 
-    private bool IsConfigured() => !string.IsNullOrWhiteSpace(_settings.BaseUrl);
+    private static IntegrationGatewayException ToGatewayException(HouseholdProviderAccessStatus status) =>
+        status switch
+        {
+            HouseholdProviderAccessStatus.MissingScope =>
+                new IntegrationGatewayException(HttpStatusCode.Forbidden, "Games Database permission is missing."),
+            HouseholdProviderAccessStatus.ProviderUnavailable =>
+                new IntegrationGatewayException(HttpStatusCode.BadGateway, "Games Database is unavailable."),
+            _ => new IntegrationGatewayException(HttpStatusCode.Conflict, "Connect Games Database to continue."),
+        };
 
     private string? BuildOpenUrl(int id)
     {
         var openUrl = _settings.OpenUrl?.TrimEnd('/');
-        return string.IsNullOrWhiteSpace(openUrl) ? null : $"{openUrl}/games/{id}";
+        return string.IsNullOrWhiteSpace(openUrl) ? null : $"{openUrl}/#/games/{id}";
     }
 
     private static string BuildQuery(Dictionary<string, string?> values)
@@ -247,14 +299,16 @@ public class GamesDatabaseClient : IGamesDatabaseClient
         public string? StatusType { get; set; }
     }
 
-    private sealed class SteamStoreSearchItemDto
+    private sealed class SourceGamesSummary
     {
-        public int AppId { get; set; }
-        public string Name { get; set; } = string.Empty;
-        public string? CoverUrl { get; set; }
-        public string? LogoUrl { get; set; }
-        public string? Price { get; set; }
-        public int? Metascore { get; set; }
+        public int TotalGames { get; set; }
+        public List<SourceGameSummaryStatus> ByStatus { get; set; } = [];
+    }
+
+    private sealed class SourceGameSummaryStatus
+    {
+        public string StatusName { get; set; } = string.Empty;
+        public int Count { get; set; }
     }
 
 }
