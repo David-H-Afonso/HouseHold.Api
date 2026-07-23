@@ -4,6 +4,7 @@ obj
 .vs
 .vscode
 publish
+Household.Api.Tests
 *.db
 *.db-shm
 *.db-wal
