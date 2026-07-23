@@ -3,6 +3,7 @@ using System;
 using Household.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Household.Api.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260524190027_AddIntegrationFoundation")]
+    partial class AddIntegrationFoundation
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "9.0.0");
@@ -596,138 +599,6 @@ namespace Household.Api.Migrations
                     b.ToTable("DashboardWidgets");
                 });
 
-            modelBuilder.Entity("Household.Api.Models.Integrations.HouseholdAuthorizationAttempt", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime?>("ConsumedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime>("ExpiresAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ProtectedCodeVerifier")
-                        .IsRequired()
-                        .HasMaxLength(1000)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Provider")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("RedirectUri")
-                        .IsRequired()
-                        .HasMaxLength(1000)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("RequestedScopes")
-                        .IsRequired()
-                        .HasMaxLength(1000)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("StateHash")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("StateHash")
-                        .IsUnique();
-
-                    b.HasIndex("UserId", "Provider", "ExpiresAt");
-
-                    b.ToTable("HouseholdAuthorizationAttempts");
-                });
-
-            modelBuilder.Entity("Household.Api.Models.Integrations.HouseholdConsumerConnection", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime>("AccessTokenExpiresAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("AccountDisplayName")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("AccountId")
-                        .IsRequired()
-                        .HasMaxLength(500)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime>("ConnectedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("GrantedScopes")
-                        .IsRequired()
-                        .HasMaxLength(1000)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("LastError")
-                        .HasMaxLength(100)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime?>("LastValidatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ProtectedAccessToken")
-                        .IsRequired()
-                        .HasMaxLength(24000)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ProtectedRefreshToken")
-                        .IsRequired()
-                        .HasMaxLength(24000)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Provider")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime>("RefreshTokenExpiresAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("SourceConnectionId")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("UserId", "Provider")
-                        .IsUnique();
-
-                    b.ToTable("HouseholdConsumerConnections");
-                });
-
             modelBuilder.Entity("Household.Api.Models.Integrations.Integration", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1023,28 +894,6 @@ namespace Household.Api.Migrations
                     b.Navigation("Integration");
                 });
 
-            modelBuilder.Entity("Household.Api.Models.Integrations.HouseholdAuthorizationAttempt", b =>
-                {
-                    b.HasOne("Household.Api.Models.Auth.User", "User")
-                        .WithMany("HouseholdAuthorizationAttempts")
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("User");
-                });
-
-            modelBuilder.Entity("Household.Api.Models.Integrations.HouseholdConsumerConnection", b =>
-                {
-                    b.HasOne("Household.Api.Models.Auth.User", "User")
-                        .WithMany("HouseholdConsumerConnections")
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("User");
-                });
-
             modelBuilder.Entity("Household.Api.Models.Integrations.IntegrationActionLog", b =>
                 {
                     b.HasOne("Household.Api.Models.Integrations.Integration", "Integration")
@@ -1068,10 +917,6 @@ namespace Household.Api.Migrations
 
             modelBuilder.Entity("Household.Api.Models.Auth.User", b =>
                 {
-                    b.Navigation("HouseholdAuthorizationAttempts");
-
-                    b.Navigation("HouseholdConsumerConnections");
-
                     b.Navigation("RefreshTokens");
                 });
 

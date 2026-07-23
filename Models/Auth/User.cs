@@ -1,5 +1,7 @@
 namespace Household.Api.Models.Auth;
 
+using Household.Api.Models.Integrations;
+
 public class User
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -13,4 +15,6 @@ public class User
 
     // Navigation
     public ICollection<RefreshToken> RefreshTokens { get; set; } = [];
+    public ICollection<HouseholdConsumerConnection> HouseholdConsumerConnections { get; set; } = [];
+    public ICollection<HouseholdAuthorizationAttempt> HouseholdAuthorizationAttempts { get; set; } = [];
 }

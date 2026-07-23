@@ -1,6 +1,7 @@
 using Household.Api.Models.Auth;
 using Household.Api.Models.Food;
 using Household.Api.Models.Home;
+using Household.Api.Models.Integrations;
 using Microsoft.EntityFrameworkCore;
 
 namespace Household.Api.Data;
@@ -29,6 +30,16 @@ public class AppDbContext : DbContext
     public DbSet<TaskTemplate> TaskTemplates { get; set; }
     public DbSet<TaskInstance> TaskInstances { get; set; }
     public DbSet<HomeIssue> HomeIssues { get; set; }
+
+    // ── Integrations ──────────────────────────────────────────────────────────
+    public DbSet<Integration> Integrations { get; set; }
+    public DbSet<IntegrationSecret> IntegrationSecrets { get; set; }
+    public DbSet<DashboardWidget> DashboardWidgets { get; set; }
+    public DbSet<IntegrationActionLog> IntegrationActionLogs { get; set; }
+    public DbSet<AppLauncherItem> AppLauncherItems { get; set; }
+    public DbSet<AllowedComposeApp> AllowedComposeApps { get; set; }
+    public DbSet<HouseholdConsumerConnection> HouseholdConsumerConnections { get; set; }
+    public DbSet<HouseholdAuthorizationAttempt> HouseholdAuthorizationAttempts { get; set; }
 
     // ── Timestamps ────────────────────────────────────────────────────────────
 
@@ -83,6 +94,36 @@ public class AppDbContext : DbContext
                     case RefreshToken rt:
                         rt.CreatedAt = now;
                         break;
+                    case Integration i:
+                        i.CreatedAt = now;
+                        i.UpdatedAt = now;
+                        break;
+                    case IntegrationSecret s:
+                        s.CreatedAt = now;
+                        s.UpdatedAt = now;
+                        break;
+                    case DashboardWidget dw:
+                        dw.CreatedAt = now;
+                        dw.UpdatedAt = now;
+                        break;
+                    case IntegrationActionLog log:
+                        log.StartedAt = now;
+                        break;
+                    case AppLauncherItem app:
+                        app.CreatedAt = now;
+                        app.UpdatedAt = now;
+                        break;
+                    case AllowedComposeApp composeApp:
+                        composeApp.CreatedAt = now;
+                        composeApp.UpdatedAt = now;
+                        break;
+                    case HouseholdConsumerConnection connection:
+                        connection.CreatedAt = now;
+                        connection.UpdatedAt = now;
+                        break;
+                    case HouseholdAuthorizationAttempt attempt:
+                        attempt.CreatedAt = now;
+                        break;
                 }
             }
             else if (entry.State == EntityState.Modified)
@@ -108,6 +149,30 @@ public class AppDbContext : DbContext
                     case TaskTemplate tt:
                         tt.UpdatedAt = now;
                         entry.Property(nameof(TaskTemplate.CreatedAt)).IsModified = false;
+                        break;
+                    case Integration i:
+                        i.UpdatedAt = now;
+                        entry.Property(nameof(Integration.CreatedAt)).IsModified = false;
+                        break;
+                    case IntegrationSecret s:
+                        s.UpdatedAt = now;
+                        entry.Property(nameof(IntegrationSecret.CreatedAt)).IsModified = false;
+                        break;
+                    case DashboardWidget dw:
+                        dw.UpdatedAt = now;
+                        entry.Property(nameof(DashboardWidget.CreatedAt)).IsModified = false;
+                        break;
+                    case AppLauncherItem app:
+                        app.UpdatedAt = now;
+                        entry.Property(nameof(AppLauncherItem.CreatedAt)).IsModified = false;
+                        break;
+                    case AllowedComposeApp composeApp:
+                        composeApp.UpdatedAt = now;
+                        entry.Property(nameof(AllowedComposeApp.CreatedAt)).IsModified = false;
+                        break;
+                    case HouseholdConsumerConnection connection:
+                        connection.UpdatedAt = now;
+                        entry.Property(nameof(HouseholdConsumerConnection.CreatedAt)).IsModified = false;
                         break;
                 }
             }
@@ -298,6 +363,125 @@ public class AppDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(hi => hi.CreatedByUserId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ── Integrations ──────────────────────────────────────────────────────
+        modelBuilder.Entity<Integration>(e =>
+        {
+            e.HasKey(i => i.Id);
+            e.HasIndex(i => new { i.Type, i.Name }).IsUnique();
+            e.Property(i => i.Type).HasConversion<string>().HasMaxLength(50);
+            e.Property(i => i.LastHealthStatus).HasConversion<string>().HasMaxLength(50);
+            e.Property(i => i.Name).IsRequired().HasMaxLength(120);
+            e.Property(i => i.BaseUrl).HasMaxLength(500);
+            e.Property(i => i.OpenUrl).HasMaxLength(500);
+        });
+
+        modelBuilder.Entity<IntegrationSecret>(e =>
+        {
+            e.HasKey(s => s.Id);
+            e.HasIndex(s => new { s.IntegrationId, s.SecretKey }).IsUnique();
+            e.Property(s => s.SecretKey).IsRequired().HasMaxLength(120);
+            e.Property(s => s.ProtectedValue).IsRequired();
+
+            e.HasOne(s => s.Integration)
+                .WithMany(i => i.Secrets)
+                .HasForeignKey(s => s.IntegrationId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<DashboardWidget>(e =>
+        {
+            e.HasKey(w => w.Id);
+            e.HasIndex(w => new { w.UserId, w.Position });
+            e.Property(w => w.WidgetType).IsRequired().HasMaxLength(120);
+
+            e.HasOne(w => w.Integration)
+                .WithMany(i => i.DashboardWidgets)
+                .HasForeignKey(w => w.IntegrationId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .IsRequired(false);
+        });
+
+        modelBuilder.Entity<IntegrationActionLog>(e =>
+        {
+            e.HasKey(log => log.Id);
+            e.HasIndex(log => new { log.IntegrationId, log.StartedAt });
+            e.HasIndex(log => new { log.AppId, log.StartedAt });
+            e.Property(log => log.Action).IsRequired().HasMaxLength(120);
+            e.Property(log => log.Status).HasConversion<string>().HasMaxLength(50);
+            e.Property(log => log.Source).IsRequired().HasMaxLength(120);
+            e.Property(log => log.AppId).HasMaxLength(120);
+            e.Property(log => log.ErrorMessage).HasMaxLength(4000);
+
+            e.HasOne(log => log.Integration)
+                .WithMany(i => i.ActionLogs)
+                .HasForeignKey(log => log.IntegrationId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .IsRequired(false);
+        });
+
+        modelBuilder.Entity<AppLauncherItem>(e =>
+        {
+            e.HasKey(app => app.Id);
+            e.HasIndex(app => app.AppId).IsUnique();
+            e.HasIndex(app => app.Category);
+            e.Property(app => app.AppId).IsRequired().HasMaxLength(120);
+            e.Property(app => app.Name).IsRequired().HasMaxLength(160);
+            e.Property(app => app.Category).IsRequired().HasMaxLength(120);
+            e.Property(app => app.Description).HasMaxLength(1000);
+            e.Property(app => app.IconUrl).HasMaxLength(500);
+            e.Property(app => app.InternalUrl).HasMaxLength(500);
+            e.Property(app => app.ExternalUrl).HasMaxLength(500);
+            e.Property(app => app.OpenUrl).HasMaxLength(500);
+        });
+
+        modelBuilder.Entity<AllowedComposeApp>(e =>
+        {
+            e.HasKey(app => app.Id);
+            e.HasIndex(app => app.AppId).IsUnique();
+            e.Property(app => app.AppId).IsRequired().HasMaxLength(120);
+            e.Property(app => app.DisplayName).IsRequired().HasMaxLength(160);
+            e.Property(app => app.ComposePath).IsRequired().HasMaxLength(1000);
+            e.Property(app => app.ProjectName).HasMaxLength(160);
+            e.Property(app => app.HealthCheckUrl).HasMaxLength(500);
+        });
+
+        modelBuilder.Entity<HouseholdConsumerConnection>(e =>
+        {
+            e.HasKey(connection => connection.Id);
+            e.HasIndex(connection => new { connection.UserId, connection.Provider }).IsUnique();
+            e.Property(connection => connection.Provider).IsRequired().HasMaxLength(50);
+            e.Property(connection => connection.ProtectedAccessToken).IsRequired().HasMaxLength(24000);
+            e.Property(connection => connection.ProtectedRefreshToken).IsRequired().HasMaxLength(24000);
+            e.Property(connection => connection.SourceConnectionId).IsRequired().HasMaxLength(200);
+            e.Property(connection => connection.AccountId).IsRequired().HasMaxLength(500);
+            e.Property(connection => connection.AccountDisplayName).IsRequired().HasMaxLength(200);
+            e.Property(connection => connection.GrantedScopes).IsRequired().HasMaxLength(1000);
+            e.Property(connection => connection.Status).HasConversion<string>().HasMaxLength(20);
+            e.Property(connection => connection.LastError).HasMaxLength(100);
+
+            e.HasOne(connection => connection.User)
+                .WithMany(user => user.HouseholdConsumerConnections)
+                .HasForeignKey(connection => connection.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<HouseholdAuthorizationAttempt>(e =>
+        {
+            e.HasKey(attempt => attempt.Id);
+            e.HasIndex(attempt => attempt.StateHash).IsUnique();
+            e.HasIndex(attempt => new { attempt.UserId, attempt.Provider, attempt.ExpiresAt });
+            e.Property(attempt => attempt.Provider).IsRequired().HasMaxLength(50);
+            e.Property(attempt => attempt.StateHash).IsRequired().HasMaxLength(64);
+            e.Property(attempt => attempt.ProtectedCodeVerifier).IsRequired().HasMaxLength(1000);
+            e.Property(attempt => attempt.RedirectUri).IsRequired().HasMaxLength(1000);
+            e.Property(attempt => attempt.RequestedScopes).IsRequired().HasMaxLength(1000);
+
+            e.HasOne(attempt => attempt.User)
+                .WithMany(user => user.HouseholdAuthorizationAttempts)
+                .HasForeignKey(attempt => attempt.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
     }
 }

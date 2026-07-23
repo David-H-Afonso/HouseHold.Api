@@ -36,14 +36,10 @@ public class ErrorHandlingMiddleware
         var (statusCode, message, details) = exception switch
         {
             DbUpdateException { InnerException: SqliteException sqEx } => sqEx.SqliteErrorCode == 19
-                ? ((int)HttpStatusCode.Conflict, "Conflict: duplicate or constraint violation", sqEx.Message)
-                : ((int)HttpStatusCode.BadRequest, "Database error", sqEx.Message),
+                ? ((int)HttpStatusCode.Conflict, "Conflict: duplicate or constraint violation", null)
+                : ((int)HttpStatusCode.BadRequest, "Database error", null),
 
-            DbUpdateException dbEx => (
-                (int)HttpStatusCode.BadRequest,
-                "Error saving data",
-                dbEx.InnerException?.Message ?? dbEx.Message
-            ),
+            DbUpdateException => ((int)HttpStatusCode.BadRequest, "Error saving data", null),
 
             ArgumentException argEx => ((int)HttpStatusCode.BadRequest, "Invalid data", argEx.Message),
 

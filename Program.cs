@@ -1,12 +1,23 @@
 using System.Text;
+using System.Text.Json.Serialization;
+using System.Security.Claims;
+using System.Threading.RateLimiting;
+using Household.Api.Application.Interfaces;
+using Household.Api.Application.Services;
 using Household.Api.Configuration;
 using Household.Api.Data;
 using Household.Api.Endpoints;
 using Household.Api.Helpers;
+using Household.Api.Infrastructure.AppLauncher;
+using Household.Api.Infrastructure.Integrations.Docker;
+using Household.Api.Infrastructure.Integrations.GamesDatabase;
 using Household.Api.Middleware;
 using Household.Api.Models.Auth;
+using Household.Api.Operations;
 using Household.Api.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 
@@ -43,6 +54,48 @@ ApplyEnvOverride(builder.Configuration, "SeedSettings:AdminUsername", "SEED_ADMI
 ApplyEnvOverride(builder.Configuration, "SeedSettings:AdminPassword", "SEED_ADMIN_PASSWORD");
 ApplyEnvOverrideBool(builder.Configuration, "SeedSettings:AdminEnabled", "SEED_ADMIN_ENABLED");
 ApplyEnvOverrideBool(builder.Configuration, "SeedSettings:DemoDataEnabled", "DEMO_DATA_ENABLED");
+ApplyEnvOverride(builder.Configuration, "AppLauncherSettings:ConfigPath", "APP_LAUNCHER_CONFIG_PATH");
+ApplyEnvOverride(builder.Configuration, "DockerSettings:Mode", "DOCKER_MODE");
+ApplyEnvOverride(builder.Configuration, "DockerSettings:DockerHost", "DOCKER_HOST");
+ApplyEnvOverride(builder.Configuration, "DockerSettings:ComposeBin", "DOCKER_COMPOSE_BIN");
+ApplyEnvOverrideInt(builder.Configuration, "DockerSettings:CommandTimeoutSeconds", "DOCKER_COMMAND_TIMEOUT_SECONDS");
+ApplyEnvOverrideInt(builder.Configuration, "DockerSettings:LogTailLines", "DOCKER_LOG_TAIL_LINES");
+ApplyEnvOverride(builder.Configuration, "GamesDatabaseSettings:BaseUrl", "GAMESDATABASE_BASE_URL");
+ApplyEnvOverride(builder.Configuration, "GamesDatabaseSettings:OpenUrl", "GAMESDATABASE_OPEN_URL");
+ApplyEnvOverride(builder.Configuration, "HouseholdConnectionSettings:PublicUrl", "HOUSEHOLD_PUBLIC_URL");
+ApplyEnvOverride(builder.Configuration, "HouseholdConnectionSettings:ApiPublicUrl", "HOUSEHOLD_API_PUBLIC_URL");
+ApplyEnvOverride(builder.Configuration, "HouseholdConnectionSettings:ClientId", "HOUSEHOLD_CLIENT_ID");
+ApplyEnvOverride(
+    builder.Configuration,
+    "HouseholdConnectionSettings:DataProtectionKeysPath",
+    "DATA_PROTECTION_KEYS_PATH"
+);
+ApplyEnvOverride(builder.Configuration, "HouseholdConnectionSettings:DoItBaseUrl", "DOIT_BASE_URL");
+ApplyEnvOverride(builder.Configuration, "HouseholdConnectionSettings:DoItOpenUrl", "DOIT_OPEN_URL");
+ApplyEnvOverride(
+    builder.Configuration,
+    "HouseholdConnectionSettings:GamesDatabaseBaseUrl",
+    "GAMESDATABASE_BASE_URL"
+);
+ApplyEnvOverride(
+    builder.Configuration,
+    "HouseholdConnectionSettings:GamesDatabaseOpenUrl",
+    "GAMESDATABASE_OPEN_URL"
+);
+ApplyEnvOverride(builder.Configuration, "HouseholdConnectionSettings:JellywatchBaseUrl", "JELLYWATCH_BASE_URL");
+ApplyEnvOverride(builder.Configuration, "HouseholdConnectionSettings:JellywatchOpenUrl", "JELLYWATCH_OPEN_URL");
+ApplyEnvOverride(builder.Configuration, "HouseholdConnectionSettings:BeastVaultBaseUrl", "BEASTVAULT_BASE_URL");
+ApplyEnvOverride(builder.Configuration, "HouseholdConnectionSettings:BeastVaultOpenUrl", "BEASTVAULT_OPEN_URL");
+ApplyEnvOverride(
+    builder.Configuration,
+    "HouseholdConnectionSettings:WarcraftArchiveBaseUrl",
+    "WARCRAFTARCHIVE_BASE_URL"
+);
+ApplyEnvOverride(
+    builder.Configuration,
+    "HouseholdConnectionSettings:WarcraftArchiveOpenUrl",
+    "WARCRAFTARCHIVE_OPEN_URL"
+);
 
 // CORS: support comma-separated FRONTEND_URL or CORS_ALLOWED_ORIGINS
 var corsOriginEnv =
@@ -72,6 +125,12 @@ builder.Services.Configure<JwtSettings>(builder.Configuration.GetSection(JwtSett
 builder.Services.Configure<CorsSettings>(builder.Configuration.GetSection(CorsSettings.SectionName));
 builder.Services.Configure<SeedSettings>(builder.Configuration.GetSection(SeedSettings.SectionName));
 builder.Services.Configure<MealTypeSettings>(builder.Configuration.GetSection(MealTypeSettings.SectionName));
+builder.Services.Configure<AppLauncherSettings>(builder.Configuration.GetSection(AppLauncherSettings.SectionName));
+builder.Services.Configure<DockerSettings>(builder.Configuration.GetSection(DockerSettings.SectionName));
+builder.Services.Configure<GamesDatabaseSettings>(builder.Configuration.GetSection(GamesDatabaseSettings.SectionName));
+builder.Services.Configure<HouseholdConnectionSettings>(
+    builder.Configuration.GetSection(HouseholdConnectionSettings.SectionName)
+);
 
 // ── Database ──────────────────────────────────────────────────────────────────
 var dbSettings = builder.Configuration.GetSection(DatabaseSettings.SectionName).Get<DatabaseSettings>() ?? new();
@@ -129,6 +188,42 @@ builder
     });
 
 builder.Services.AddAuthorization();
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy(
+        "integration-authorize",
+        context =>
+            RateLimitPartition.GetFixedWindowLimiter(
+                context.User.FindFirstValue(ClaimTypes.NameIdentifier)
+                    ?? context.Connection.RemoteIpAddress?.ToString()
+                    ?? "unknown",
+                _ =>
+                    new FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = 10,
+                        Window = TimeSpan.FromMinutes(1),
+                        QueueLimit = 0,
+                        AutoReplenishment = true,
+                    }
+            )
+    );
+    options.AddPolicy(
+        "integration-callback",
+        context =>
+            RateLimitPartition.GetFixedWindowLimiter(
+                context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                _ =>
+                    new FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = 30,
+                        Window = TimeSpan.FromMinutes(5),
+                        QueueLimit = 0,
+                        AutoReplenishment = true,
+                    }
+            )
+    );
+});
 
 // ── CORS ──────────────────────────────────────────────────────────────────────
 var corsSettings = builder.Configuration.GetSection(CorsSettings.SectionName).Get<CorsSettings>() ?? new();
@@ -217,8 +312,38 @@ builder.Services.AddScoped<IRoomService, RoomService>();
 builder.Services.AddScoped<ITaskService, TaskService>();
 builder.Services.AddScoped<IIssueService, IssueService>();
 builder.Services.AddScoped<IMealTypeHelper, MealTypeHelper>();
+var householdConnectionSettings =
+    builder.Configuration.GetSection(HouseholdConnectionSettings.SectionName).Get<HouseholdConnectionSettings>()
+    ?? new();
+var dataProtectionKeysPath = householdConnectionSettings.DataProtectionKeysPath;
+if (!Path.IsPathRooted(dataProtectionKeysPath))
+    dataProtectionKeysPath = Path.GetFullPath(dataProtectionKeysPath);
+Directory.CreateDirectory(dataProtectionKeysPath);
+builder
+    .Services.AddDataProtection()
+    .PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeysPath))
+    .SetApplicationName("Household.Api");
+builder.Services.AddScoped<ISecretProtector, SecretProtector>();
+builder.Services.AddSingleton<IIntegrationRegistry, IntegrationRegistry>();
+builder.Services.AddScoped<IIntegrationService, IntegrationService>();
+builder.Services.AddScoped<IIntegrationHealthService, IntegrationHealthService>();
+builder.Services.AddScoped<IDashboardAggregationService, DashboardAggregationService>();
+builder.Services.AddScoped<IIntegrationActionLogService, IntegrationActionLogService>();
+builder.Services.AddScoped<IAppLauncherConfigLoader, AppLauncherConfigLoader>();
+builder.Services.AddScoped<IAppCatalogService, AppCatalogService>();
+builder.Services.AddScoped<IDockerClient, DockerClient>();
+builder.Services.AddScoped<IContainerStatusService, ContainerStatusService>();
+builder.Services.AddHttpClient<IGamesDatabaseClient, GamesDatabaseClient>();
+builder.Services.AddSingleton<HouseholdProviderRegistry>();
+builder.Services.AddSingleton<HouseholdConnectionCoordinator>();
+builder.Services.AddScoped<HouseholdConsumerConnectionService>();
+builder.Services.AddHttpClient("HouseholdProviders", client => client.Timeout = TimeSpan.FromSeconds(15));
 
 builder.Services.AddHttpContextAccessor();
+builder.Services.ConfigureHttpJsonOptions(options =>
+{
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
+});
 
 // ── Build ─────────────────────────────────────────────────────────────────────
 var app = builder.Build();
@@ -239,6 +364,13 @@ using (var scope = app.Services.CreateScope())
     await SeedAsync(db, seedCfg, scope.ServiceProvider.GetRequiredService<ILogger<Program>>());
 }
 
+var adminCommandExitCode = await AdminRecoveryCommand.TryRunAsync(args, app.Services);
+if (adminCommandExitCode.HasValue)
+{
+    Environment.ExitCode = adminCommandExitCode.Value;
+    return;
+}
+
 // ── Middleware pipeline ────────────────────────────────────────────────────────
 app.UseSwagger();
 app.UseSwaggerUI(c =>
@@ -249,12 +381,27 @@ app.UseSwaggerUI(c =>
 
 app.UseMiddleware<ErrorHandlingMiddleware>();
 
+app.Use(
+    async (context, next) =>
+    {
+        if (context.Request.Path.StartsWithSegments("/integrations/callback"))
+        {
+            context.Response.Headers.CacheControl = "no-store";
+            context.Response.Headers.Pragma = "no-cache";
+            context.Response.Headers["Referrer-Policy"] = "no-referrer";
+            context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+        }
+        await next(context);
+    }
+);
+
 if (app.Environment.IsDevelopment())
     app.UseCors("AllowAll");
 else
     app.UseCors("AllowSpecificOrigins");
 
 app.UseAuthentication();
+app.UseRateLimiter();
 app.UseAuthorization();
 
 // ── Health ────────────────────────────────────────────────────────────────────
@@ -298,6 +445,11 @@ app.MapMealEndpoints();
 app.MapRoomEndpoints();
 app.MapTaskEndpoints();
 app.MapIssueEndpoints();
+app.MapIntegrationEndpoints();
+app.MapDashboardEndpoints();
+app.MapAppsModuleEndpoints();
+app.MapGamesModuleEndpoints();
+app.MapHouseholdConnectionEndpoints();
 
 app.Run();
 
