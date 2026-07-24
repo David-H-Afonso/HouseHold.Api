@@ -53,7 +53,7 @@ public static class GamesModuleEndpoints
             }
         );
 
-        group.MapGet("/{id:int}/assets/{kind}", async (
+        group.MapGet("/assets/{id:int}/{kind}", async (
             int id,
             string kind,
             HttpContext context,
