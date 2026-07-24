@@ -268,8 +268,11 @@ public abstract class HouseholdProviderClientBase
 
     private static Uri BuildRequestUri(string baseUrl, string path)
     {
-        if (Uri.TryCreate(path, UriKind.Absolute, out _)
+        if (string.IsNullOrWhiteSpace(path)
+            || path[0] != '/'
             || path.StartsWith("//", StringComparison.Ordinal)
+            || path.Contains('\\')
+            || path.Any(char.IsControl)
             || !Uri.TryCreate(baseUrl.Trim(), UriKind.Absolute, out var origin)
             || origin.Scheme is not ("http" or "https")
             || !string.IsNullOrEmpty(origin.UserInfo)
