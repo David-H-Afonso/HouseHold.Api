@@ -275,7 +275,11 @@ public abstract class HouseholdProviderClientBase
             || !string.IsNullOrEmpty(origin.UserInfo)
             || !string.IsNullOrEmpty(origin.Query)
             || !string.IsNullOrEmpty(origin.Fragment)
-            || !Uri.TryCreate(origin, "/" + path.TrimStart('/'), out var combined)
+            || !Uri.TryCreate(
+                $"{origin.Scheme}://{origin.Authority}/{path.TrimStart('/')}",
+                UriKind.Absolute,
+                out var combined
+            )
             || !string.Equals(origin.Scheme, combined.Scheme, StringComparison.OrdinalIgnoreCase)
             || !string.Equals(origin.Host, combined.Host, StringComparison.OrdinalIgnoreCase)
             || origin.Port != combined.Port)
