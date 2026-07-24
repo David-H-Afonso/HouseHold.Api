@@ -11,9 +11,9 @@ using Microsoft.Extensions.Options;
 
 namespace Household.Api.Infrastructure.Integrations.GamesDatabase;
 
-public class GamesDatabaseClient : IGamesDatabaseClient
+public class GamesDatabaseClient : HouseholdProviderClientBase, IGamesDatabaseClient
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
+    private static readonly new JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
@@ -27,12 +27,23 @@ public class GamesDatabaseClient : IGamesDatabaseClient
         HttpClient httpClient,
         IOptions<GamesDatabaseSettings> settings,
         IHouseholdProviderAccessService connectionAccess
-    )
+    ) : base(httpClient, connectionAccess, "games-database", "Games Database")
     {
         _httpClient = httpClient;
         _settings = settings.Value;
         _connectionAccess = connectionAccess;
         _httpClient.Timeout = TimeSpan.FromSeconds(Math.Clamp(_settings.TimeoutSeconds, 3, 60));
+    }
+
+    public async Task<(byte[] Content, string ContentType)?> GetAssetAsync(Guid userId, int id, string kind, CancellationToken cancellationToken)
+    {
+        if (id <= 0 || kind is not ("cover" or "logo")) return null;
+        var game = await SendAsync<GameDto>(userId, "games.read", HttpMethod.Get, $"/api/games/{id}", null, cancellationToken);
+        var source = kind == "cover" ? game?.Cover : game?.Logo;
+        var path = BuildProviderPath(source);
+        if (path is null) return null;
+        var file = await DownloadAsync(userId, "games.read", path, 8 * 1024 * 1024, cancellationToken);
+        return file is null ? null : (file.Content, file.ContentType);
     }
 
     public async Task<GamesModuleListDto> GetGamesAsync(
@@ -317,8 +328,8 @@ public class GamesDatabaseClient : IGamesDatabaseClient
             game.StatusId,
             game.StatusName,
             game.PlatformName,
-            BuildAssetUrl(game.Logo),
-            BuildAssetUrl(game.Cover),
+            BuildAssetUrl(game.Id, "logo", game.Logo),
+            BuildAssetUrl(game.Id, "cover", game.Cover),
             game.Grade,
             game.Score,
             game.Started,
@@ -339,20 +350,35 @@ public class GamesDatabaseClient : IGamesDatabaseClient
             BuildOpenUrl(game.Id)
         );
 
-    private string? BuildAssetUrl(string? path)
+    private static string? BuildProviderPath(string? path)
     {
         if (string.IsNullOrWhiteSpace(path))
             return null;
-        if (Uri.TryCreate(path, UriKind.Absolute, out _)) return null;
+        if (Uri.TryCreate(path, UriKind.Absolute, out var absolute))
+            return absolute.Scheme is ("http" or "https") && string.IsNullOrEmpty(absolute.UserInfo)
+                ? absolute.PathAndQuery : null;
+        return path[0] == '/' && !path.StartsWith("//", StringComparison.Ordinal) && !path.Contains('\\') && !path.Any(char.IsControl) ? path : null;
+    }
 
-        var openUrl = NormalizePublicBaseUrl();
-        if (openUrl is null || !Uri.TryCreate(openUrl + "/", UriKind.Absolute, out var origin)
-            || !Uri.TryCreate(origin, path.TrimStart('/'), out var combined)
-            || !string.Equals(origin.Scheme, combined.Scheme, StringComparison.OrdinalIgnoreCase)
-            || !string.Equals(origin.Host, combined.Host, StringComparison.OrdinalIgnoreCase)
-            || origin.Port != combined.Port)
+    private string? BuildAssetUrl(int id, string kind, string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return null;
+        if (Uri.TryCreate(path, UriKind.Absolute, out var absolute))
+        {
+            var configured = NormalizePublicBaseUrl();
+            if (!Uri.TryCreate(configured, UriKind.Absolute, out var configuredUri)
+                || !string.Equals(absolute.Scheme, configuredUri.Scheme, StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(absolute.Host, configuredUri.Host, StringComparison.OrdinalIgnoreCase)
+                || absolute.Port != configuredUri.Port
+                || !string.IsNullOrEmpty(absolute.UserInfo))
+                return null;
+        }
+        else if (BuildProviderPath(path) is null)
+        {
             return null;
-        return combined.ToString();
+        }
+
+        return $"/modules/games/assets/{id}/{kind}";
     }
 
     private string? NormalizePublicBaseUrl()

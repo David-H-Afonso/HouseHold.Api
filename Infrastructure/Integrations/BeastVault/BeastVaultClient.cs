@@ -63,7 +63,7 @@ public sealed class BeastVaultClient : HouseholdProviderClientBase, IBeastVaultC
                     tag.Id,
                     tag.Name,
                     tag.ColorHex,
-                    BuildPublicUrl(_settings.BeastVaultOpenUrl, tag.ImagePath)
+                    BuildTagImageUrl(tag.ImagePath)
                 )).ToList(),
                 BuildPublicUrl(_settings.BeastVaultOpenUrl, $"/pokemon/{item.Id}")
             )).ToList(),
@@ -120,8 +120,8 @@ public sealed class BeastVaultClient : HouseholdProviderClientBase, IBeastVaultC
     private static string BuildConfiguredPath(string template, string id)
     {
         var path = template.Replace("{id}", id, StringComparison.Ordinal);
-        if (!path.StartsWith('/') || path.StartsWith("//", StringComparison.Ordinal)
-            || Uri.TryCreate(path, UriKind.Absolute, out _))
+        if (string.IsNullOrWhiteSpace(path) || path[0] != '/' || path.StartsWith("//", StringComparison.Ordinal)
+            || path.Contains('\\') || path.Any(char.IsControl))
             throw new ArgumentException("Pokemon download path template must be a relative provider path.");
         return path;
     }
@@ -138,8 +138,44 @@ public sealed class BeastVaultClient : HouseholdProviderClientBase, IBeastVaultC
             tag.PokemonCount,
             tag.Category,
             tag.ColorHex,
-            BuildPublicUrl(_settings.BeastVaultOpenUrl, tag.ImagePath)
+            BuildTagImageUrl(tag.ImagePath)
         )).ToList();
+    }
+
+    public async Task<(byte[] Content, string ContentType)?> GetTagImageAsync(
+        Guid userId,
+        string fileName,
+        CancellationToken cancellationToken
+    )
+    {
+        var safeName = Path.GetFileName(fileName);
+        if (string.IsNullOrWhiteSpace(safeName) || !string.Equals(safeName, fileName, StringComparison.Ordinal)
+            || safeName.Length > 180 || safeName.Any(character => !char.IsLetterOrDigit(character) && character is not ('.' or '-' or '_')))
+            return null;
+
+        var file = await DownloadAsync(userId, "pokemon.read", $"/tags/images/{Uri.EscapeDataString(safeName)}", _externalSettings.ProviderAssetMaxBytes, cancellationToken);
+        return file is null || !IsAllowedImageContentType(file.ContentType) ? null : (file.Content, file.ContentType);
+    }
+
+    private string? BuildTagImageUrl(string? imagePath)
+    {
+        if (string.IsNullOrWhiteSpace(imagePath)) return null;
+        var candidate = imagePath.Trim();
+        if (Uri.TryCreate(candidate, UriKind.Absolute, out var absolute))
+        {
+            var configured = _settings.BeastVaultOpenUrl?.TrimEnd('/');
+            if (!Uri.TryCreate(configured, UriKind.Absolute, out var configuredUri)
+                || !string.Equals(absolute.Host, configuredUri.Host, StringComparison.OrdinalIgnoreCase)
+                || absolute.Port != configuredUri.Port)
+                return null;
+            candidate = absolute.PathAndQuery;
+        }
+
+        if (!candidate.StartsWith("/tags/images/", StringComparison.OrdinalIgnoreCase)) return null;
+        var fileName = Uri.UnescapeDataString(candidate.TrimEnd('/').Split('/').LastOrDefault() ?? string.Empty);
+        if (string.IsNullOrWhiteSpace(fileName) || fileName.Any(character => !char.IsLetterOrDigit(character) && character is not ('.' or '-' or '_')))
+            return null;
+        return $"/modules/pokemon/tags/images/{Uri.EscapeDataString(fileName)}";
     }
 
     private static string BuildFallbackSpriteUrl(int speciesId, bool isShiny) =>

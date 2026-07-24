@@ -62,6 +62,18 @@ public static class PokemonModuleEndpoints
                 : Results.File(sprite.Value.Content, sprite.Value.ContentType, enableRangeProcessing: false);
         }).RequireRateLimiting("asset");
 
+        group.MapGet("/tags/images/{fileName}", async (
+            string fileName,
+            HttpContext context,
+            IBeastVaultClient client,
+            CancellationToken ct) =>
+        {
+            var userId = context.GetUserId();
+            if (userId is null) return Results.Unauthorized();
+            var image = await client.GetTagImageAsync(userId.Value, fileName, ct);
+            return image is null ? Results.NotFound() : Results.File(image.Value.Content, image.Value.ContentType, enableRangeProcessing: false);
+        }).RequireRateLimiting("asset");
+
         group.MapGet("/{id:int}/download", async (
             int id,
             HttpContext context,

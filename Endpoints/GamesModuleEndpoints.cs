@@ -53,6 +53,19 @@ public static class GamesModuleEndpoints
             }
         );
 
+        group.MapGet("/{id:int}/assets/{kind}", async (
+            int id,
+            string kind,
+            HttpContext context,
+            IGamesDatabaseClient client,
+            CancellationToken ct) =>
+        {
+            var userId = context.GetUserId();
+            if (userId is null) return Results.Unauthorized();
+            var asset = await client.GetAssetAsync(userId.Value, id, kind, ct);
+            return asset is null ? Results.NotFound() : Results.File(asset.Value.Content, asset.Value.ContentType, enableRangeProcessing: false);
+        }).RequireRateLimiting("asset");
+
         group.MapPatch(
             "/{id:int}/status",
             async (

@@ -304,11 +304,23 @@ public abstract class HouseholdProviderClientBase
         // Provider-returned absolute URLs are not trusted. Keeping links on the
         // configured public origin prevents a compromised provider from turning
         // Household DTOs into arbitrary external links.
-        if (Uri.TryCreate(path, UriKind.Absolute, out _)) return null;
+        if (Uri.TryCreate(path, UriKind.Absolute, out var suppliedUri))
+        {
+            return suppliedUri.Scheme is ("http" or "https")
+                && string.IsNullOrEmpty(suppliedUri.UserInfo)
+                && string.Equals(baseUri.Scheme, suppliedUri.Scheme, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(baseUri.Host, suppliedUri.Host, StringComparison.OrdinalIgnoreCase)
+                && baseUri.Port == suppliedUri.Port
+                ? suppliedUri.ToString()
+                : null;
+        }
+
+        if (path[0] != '/' || path.StartsWith("//", StringComparison.Ordinal) || path.Contains('\\') || path.Any(char.IsControl))
+            return null;
 
         var normalizedBase = publicBaseUrl.TrimEnd('/');
-        if (!Uri.TryCreate(normalizedBase + "/", UriKind.Absolute, out var origin)
-            || !Uri.TryCreate(origin, path.TrimStart('/'), out var combined)
+        if (!Uri.TryCreate(normalizedBase, UriKind.Absolute, out var origin)
+            || !Uri.TryCreate($"{origin.Scheme}://{origin.Authority}/{path.TrimStart('/')}", UriKind.Absolute, out var combined)
             || !string.Equals(origin.Scheme, combined.Scheme, StringComparison.OrdinalIgnoreCase)
             || !string.Equals(origin.Host, combined.Host, StringComparison.OrdinalIgnoreCase)
             || origin.Port != combined.Port)

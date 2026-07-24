@@ -108,8 +108,8 @@ public sealed class WarcraftArchiveClient : HouseholdProviderClientBase, IWarcra
     private static string BuildConfiguredPath(string template, string id)
     {
         var path = template.Replace("{id}", id, StringComparison.Ordinal);
-        if (!path.StartsWith('/') || path.StartsWith("//", StringComparison.Ordinal)
-            || Uri.TryCreate(path, UriKind.Absolute, out _))
+        if (string.IsNullOrWhiteSpace(path) || path[0] != '/' || path.StartsWith("//", StringComparison.Ordinal)
+            || path.Contains('\\') || path.Any(char.IsControl))
             throw new ArgumentException("Warcraft status path template must be a relative provider path.");
         return path;
     }

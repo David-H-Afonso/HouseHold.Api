@@ -25,7 +25,7 @@ public class GamesDatabaseClientTests
 
         Assert.Single(result.Items);
         Assert.Equal("Test Game", result.Items[0].Name);
-        Assert.Equal("https://games.example/game-images/test.jpg", result.Items[0].Cover);
+        Assert.Equal("/modules/games/assets/7/cover", result.Items[0].Cover);
         Assert.Equal(userId, access.Requests.Single().UserId);
         Assert.Equal("games.read", access.Requests.Single().Scope);
         Assert.Equal("Bearer", handler.Requests.Single().Authorization?.Scheme);

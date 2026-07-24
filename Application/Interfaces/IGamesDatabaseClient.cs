@@ -14,6 +14,7 @@ public interface IGamesDatabaseClient
     );
 
     Task<GameModuleItemDto?> GetGameAsync(Guid userId, int id, CancellationToken cancellationToken);
+    Task<(byte[] Content, string ContentType)?> GetAssetAsync(Guid userId, int id, string kind, CancellationToken cancellationToken);
     Task<GameModuleItemDto?> UpdateStatusAsync(Guid userId, int id, int statusId, CancellationToken cancellationToken);
     Task<IReadOnlyList<GameStatusOptionDto>> GetStatusesAsync(Guid userId, CancellationToken cancellationToken);
     Task<GamesSummaryDto> GetSummaryAsync(Guid userId, CancellationToken cancellationToken);
