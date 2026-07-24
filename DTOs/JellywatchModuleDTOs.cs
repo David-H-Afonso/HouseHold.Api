@@ -17,7 +17,9 @@ public record JellywatchActivityDto(
     int? EpisodeNumber,
     string EventType,
     DateTime Timestamp,
+    string? PosterUrl,
     decimal? UserRating,
+    double? TmdbRating,
     string? OpenUrl
 );
 

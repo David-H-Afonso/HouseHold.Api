@@ -19,5 +19,18 @@ public static class WarcraftModuleEndpoints
             )
             .WithTags("Warcraft")
             .RequireAuthorization();
+
+        app.MapGet(
+                "/modules/warcraft/weekly",
+                async (HttpContext context, IWarcraftArchiveClient client, CancellationToken ct) =>
+                {
+                    var userId = context.GetUserId();
+                    return userId is null
+                        ? Results.Unauthorized()
+                        : Results.Ok(await client.GetWeeklyAsync(userId.Value, ct));
+                }
+            )
+            .WithTags("Warcraft")
+            .RequireAuthorization();
     }
 }

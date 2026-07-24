@@ -40,6 +40,28 @@ public sealed class DoItClient(HttpClient httpClient, IHouseholdProviderAccessSe
         );
     }
 
+    public Task<DoItOccurrenceActionDto> CompleteOccurrenceAsync(
+        Guid userId,
+        Guid occurrenceId,
+        CancellationToken cancellationToken
+    ) => PostRequiredAsync<DoItOccurrenceActionDto>(
+        userId,
+        "tasks.complete",
+        $"/api/integrations/household/v1/occurrences/{occurrenceId}/complete",
+        cancellationToken
+    );
+
+    public Task<DoItOccurrenceActionDto> UndoOccurrenceAsync(
+        Guid userId,
+        Guid occurrenceId,
+        CancellationToken cancellationToken
+    ) => PostRequiredAsync<DoItOccurrenceActionDto>(
+        userId,
+        "tasks.undo",
+        $"/api/integrations/household/v1/occurrences/{occurrenceId}/undo",
+        cancellationToken
+    );
+
     private static DoItNowTaskDto ToDto(SourceTask task, string state) =>
         new(
             task.OccurrenceId,

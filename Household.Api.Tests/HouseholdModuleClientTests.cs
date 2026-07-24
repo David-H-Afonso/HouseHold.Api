@@ -42,8 +42,8 @@ public class HouseholdModuleClientTests
         var handler = new RecordingHandler(_ => JsonResponse("""
             {
               "profile":{"displayName":"David","totalSeriesWatching":2,"totalSeriesCompleted":3,"totalMoviesSeen":4,"totalEpisodesSeen":5},
-              "activity":[{"eventId":7,"title":"Arcane","mediaType":"series","eventType":"Finished","timestamp":"2026-07-23T12:00:00Z"}],
-              "upcoming":[{"mediaItemId":9,"seriesId":4,"seriesTitle":"Arcane","seasonNumber":2,"episodeNumber":3,"airDate":"2026-07-24","airTimeUtc":"19:00","batchCount":1}]
+              "activity":[{"eventId":7,"mediaItemId":9,"title":"Arcane","mediaType":"series","eventType":"Finished","timestamp":"2026-07-23T12:00:00Z","posterUrl":"/api/asset/9/poster","tmdbRating":8.7}],
+              "upcoming":[{"mediaItemId":9,"seriesId":4,"seriesTitle":"Arcane","seasonNumber":2,"episodeNumber":3,"airDate":"2026-07-24","airTimeUtc":"19:00","batchCount":1,"posterUrl":"/api/asset/9/poster"}]
             }
             """));
         var access = new StubAccessService("jelly-token");
@@ -55,8 +55,9 @@ public class HouseholdModuleClientTests
 
         var result = await client.GetDashboardAsync(Guid.NewGuid(), CancellationToken.None);
 
-        Assert.Single(result.Activity);
-        Assert.Equal("https://jelly.example/api/asset/9/Poster", Assert.Single(result.Upcoming).PosterUrl);
+        Assert.Equal(8.7, Assert.Single(result.Activity).TmdbRating);
+        Assert.Equal("https://jelly.example/api/asset/9/poster", result.Activity[0].PosterUrl);
+        Assert.Equal("https://jelly.example/api/asset/9/poster", Assert.Single(result.Upcoming).PosterUrl);
         Assert.Contains("activityLimit=3", handler.Requests.Single().Uri?.Query);
         Assert.Contains("upcomingDays=30", handler.Requests.Single().Uri?.Query);
         Assert.Equal("activity.read", access.Requests.Single().Scope);
@@ -97,6 +98,7 @@ public class HouseholdModuleClientTests
 
         var pokemon = Assert.Single(result.Items);
         Assert.Equal("https://bv.example/sprites/pokemon/home/25.png", pokemon.SpriteUrl);
+        Assert.Contains("/other/home/25.png", pokemon.FallbackSpriteUrl);
         Assert.Equal("https://bv.example/pokemon/25", pokemon.OpenUrl);
         var query = handler.Requests.Single().Uri?.Query ?? string.Empty;
         Assert.Contains("search=pika%20chu", query);
@@ -123,6 +125,42 @@ public class HouseholdModuleClientTests
         Assert.False(access.Requests[0].ForceRefresh);
         Assert.True(access.Requests[1].ForceRefresh);
         Assert.Equal("version-1", access.Requests[1].FailedTokenVersion);
+    }
+
+    [Fact]
+    public async Task DoItOccurrenceAction_UsesNarrowPostEndpointAndWriteScope()
+    {
+        var occurrenceId = Guid.NewGuid();
+        var handler = new RecordingHandler(_ => JsonResponse($$"""
+            {"occurrenceId":"{{occurrenceId}}","taskId":"{{Guid.NewGuid()}}","occurrenceDate":"2026-07-23","occurrenceStatus":"Done"}
+            """));
+        var access = new StubAccessService("doit-write-token");
+        var client = new DoItClient(new HttpClient(handler), access);
+
+        var result = await client.CompleteOccurrenceAsync(Guid.NewGuid(), occurrenceId, CancellationToken.None);
+
+        Assert.Equal("Done", result.OccurrenceStatus);
+        Assert.Equal(HttpMethod.Post, handler.Requests.Single().Method);
+        Assert.Equal($"/api/integrations/household/v1/occurrences/{occurrenceId}/complete", handler.Requests.Single().Uri?.AbsolutePath);
+        Assert.Equal("tasks.complete", access.Requests.Single().Scope);
+    }
+
+    [Fact]
+    public async Task WarcraftWeekly_MapsReadableStatusAndDifficulty()
+    {
+        var handler = new RecordingHandler(_ => JsonResponse("""
+            {"total":1,"notStarted":0,"pending":0,"inProgress":1,"lastDay":0,"lastWeek":0,"finished":0,"items":[{"id":"11111111-1111-1111-1111-111111111111","characterName":"Rikku","characterClass":"Mage","contentName":"Raid","expansion":"The War Within","difficulty":4,"status":2,"updatedAt":"2026-07-23T12:00:00Z"}]}
+            """));
+        var access = new StubAccessService("warcraft-token");
+        var client = new WarcraftArchiveClient(new HttpClient(handler), access);
+
+        var result = await client.GetWeeklyAsync(Guid.NewGuid(), CancellationToken.None);
+
+        Assert.Equal(0, result.Summary.CompletionPercent);
+        var item = Assert.Single(result.Items);
+        Assert.Equal("Heroic", item.Difficulty);
+        Assert.Equal("InProgress", item.Status);
+        Assert.Equal("/dashboard/weekly", handler.Requests.Single().Uri?.AbsolutePath);
     }
 
     private static void AssertAccess(
@@ -183,12 +221,13 @@ public class HouseholdModuleClientTests
             CancellationToken cancellationToken
         )
         {
-            Requests.Add(new RecordedRequest(request.RequestUri, request.Headers.Authorization));
+            Requests.Add(new RecordedRequest(request.Method, request.RequestUri, request.Headers.Authorization));
             return Task.FromResult(responseFactory(request));
         }
     }
 
     private sealed record RecordedRequest(
+        HttpMethod Method,
         Uri? Uri,
         System.Net.Http.Headers.AuthenticationHeaderValue? Authorization
     );

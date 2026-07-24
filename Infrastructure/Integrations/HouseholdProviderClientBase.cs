@@ -40,12 +40,22 @@ public abstract class HouseholdProviderClientBase
         string path,
         CancellationToken cancellationToken
     ) =>
-        await SendAsync<T>(userId, requiredScope, path, cancellationToken)
+        await SendAsync<T>(userId, requiredScope, HttpMethod.Get, path, cancellationToken)
+        ?? throw new IntegrationGatewayException(HttpStatusCode.BadGateway, $"{_displayName} returned an empty response.");
+
+    protected async Task<T> PostRequiredAsync<T>(
+        Guid userId,
+        string requiredScope,
+        string path,
+        CancellationToken cancellationToken
+    ) =>
+        await SendAsync<T>(userId, requiredScope, HttpMethod.Post, path, cancellationToken)
         ?? throw new IntegrationGatewayException(HttpStatusCode.BadGateway, $"{_displayName} returned an empty response.");
 
     private async Task<T?> SendAsync<T>(
         Guid userId,
         string requiredScope,
+        HttpMethod method,
         string path,
         CancellationToken cancellationToken,
         bool retrying = false,
@@ -63,7 +73,7 @@ public abstract class HouseholdProviderClientBase
         if (access.Status != HouseholdProviderAccessStatus.Success || access.AccessToken is null || access.BaseUrl is null)
             throw ToGatewayException(access.Status);
 
-        using var request = new HttpRequestMessage(HttpMethod.Get, $"{access.BaseUrl.TrimEnd('/')}{path}");
+        using var request = new HttpRequestMessage(method, $"{access.BaseUrl.TrimEnd('/')}{path}");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", access.AccessToken);
 
         HttpResponseMessage response;
@@ -85,6 +95,7 @@ public abstract class HouseholdProviderClientBase
                 return await SendAsync<T>(
                     userId,
                     requiredScope,
+                    method,
                     path,
                     cancellationToken,
                     retrying: true,

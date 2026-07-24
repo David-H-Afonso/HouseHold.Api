@@ -8,8 +8,10 @@ public static class DoItModuleEndpoints
 {
     public static void MapDoItModuleEndpoints(this WebApplication app)
     {
-        app.MapGet(
-                "/modules/today",
+        var group = app.MapGroup("/modules/today").WithTags("Today").RequireAuthorization();
+
+        group.MapGet(
+                "/",
                 async (string? date, HttpContext context, IDoItClient client, CancellationToken ct) =>
                 {
                     var userId = context.GetUserId();
@@ -23,8 +25,30 @@ public static class DoItModuleEndpoints
 
                     return Results.Ok(await client.GetNowAsync(userId.Value, date, ct));
                 }
-            )
-            .WithTags("Today")
-            .RequireAuthorization();
+            );
+
+        group.MapPost("/occurrences/{occurrenceId:guid}/complete", async (
+            Guid occurrenceId,
+            HttpContext context,
+            IDoItClient client,
+            CancellationToken ct) =>
+        {
+            var userId = context.GetUserId();
+            return userId is null
+                ? Results.Unauthorized()
+                : Results.Ok(await client.CompleteOccurrenceAsync(userId.Value, occurrenceId, ct));
+        });
+
+        group.MapPost("/occurrences/{occurrenceId:guid}/undo", async (
+            Guid occurrenceId,
+            HttpContext context,
+            IDoItClient client,
+            CancellationToken ct) =>
+        {
+            var userId = context.GetUserId();
+            return userId is null
+                ? Results.Unauthorized()
+                : Results.Ok(await client.UndoOccurrenceAsync(userId.Value, occurrenceId, ct));
+        });
     }
 }

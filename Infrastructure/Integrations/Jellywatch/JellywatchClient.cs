@@ -44,7 +44,9 @@ public sealed class JellywatchClient : HouseholdProviderClientBase, IJellywatchC
                 item.EpisodeNumber,
                 item.EventType,
                 item.Timestamp,
+                BuildPublicUrl(_settings.JellywatchOpenUrl, item.PosterUrl ?? $"/api/asset/{item.MediaItemId}/poster"),
                 item.UserRating,
+                item.TmdbRating,
                 BuildPublicUrl(_settings.JellywatchOpenUrl, "/#/activity")
             )).ToList(),
             source.Upcoming.Select(item => new JellywatchUpcomingDto(
@@ -58,7 +60,7 @@ public sealed class JellywatchClient : HouseholdProviderClientBase, IJellywatchC
                 item.AirTime,
                 item.AirTimeUtc,
                 item.BatchCount,
-                BuildPublicUrl(_settings.JellywatchOpenUrl, $"/api/asset/{item.MediaItemId}/Poster"),
+                BuildPublicUrl(_settings.JellywatchOpenUrl, item.PosterUrl ?? $"/api/asset/{item.MediaItemId}/poster"),
                 BuildPublicUrl(_settings.JellywatchOpenUrl, $"/#/series/{item.SeriesId}")
             )).ToList()
         );
@@ -83,6 +85,7 @@ public sealed class JellywatchClient : HouseholdProviderClientBase, IJellywatchC
     private sealed class SourceActivity
     {
         public long EventId { get; set; }
+        public long MediaItemId { get; set; }
         public string Title { get; set; } = string.Empty;
         public string MediaType { get; set; } = string.Empty;
         public string? EpisodeName { get; set; }
@@ -90,7 +93,9 @@ public sealed class JellywatchClient : HouseholdProviderClientBase, IJellywatchC
         public int? EpisodeNumber { get; set; }
         public string EventType { get; set; } = string.Empty;
         public DateTime Timestamp { get; set; }
+        public string? PosterUrl { get; set; }
         public decimal? UserRating { get; set; }
+        public double? TmdbRating { get; set; }
     }
 
     private sealed class SourceUpcoming
@@ -105,5 +110,6 @@ public sealed class JellywatchClient : HouseholdProviderClientBase, IJellywatchC
         public string? AirTime { get; set; }
         public string? AirTimeUtc { get; set; }
         public int BatchCount { get; set; } = 1;
+        public string? PosterUrl { get; set; }
     }
 }

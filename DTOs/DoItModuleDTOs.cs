@@ -22,3 +22,10 @@ public record DoItNowDto(
     DoItProgressDto Progress,
     IReadOnlyList<DoItNowTaskDto> Tasks
 );
+
+public record DoItOccurrenceActionDto(
+    Guid OccurrenceId,
+    Guid TaskId,
+    string OccurrenceDate,
+    string OccurrenceStatus
+);

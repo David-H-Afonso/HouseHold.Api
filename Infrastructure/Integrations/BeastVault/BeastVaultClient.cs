@@ -54,6 +54,7 @@ public sealed class BeastVaultClient : HouseholdProviderClientBase, IBeastVaultC
                 item.Type1,
                 item.Type2,
                 BuildPublicUrl(_settings.BeastVaultOpenUrl, item.SpriteUrl),
+                BuildFallbackSpriteUrl(item.SpeciesId, item.IsShiny),
                 item.Tags.Select(tag => new PokemonTagDto(
                     tag.Id,
                     tag.Name,
@@ -83,6 +84,9 @@ public sealed class BeastVaultClient : HouseholdProviderClientBase, IBeastVaultC
             BuildPublicUrl(_settings.BeastVaultOpenUrl, tag.ImagePath)
         )).ToList();
     }
+
+    private static string BuildFallbackSpriteUrl(int speciesId, bool isShiny) =>
+        $"https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/home/{(isShiny ? "shiny/" : string.Empty)}{speciesId}.png";
 
     private sealed class SourceList
     {

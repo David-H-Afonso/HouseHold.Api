@@ -23,6 +23,7 @@ public record PokemonModuleItemDto(
     string? Type1,
     string? Type2,
     string? SpriteUrl,
+    string FallbackSpriteUrl,
     IReadOnlyList<PokemonTagDto> Tags,
     string? OpenUrl
 );
