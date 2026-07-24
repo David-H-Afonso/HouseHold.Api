@@ -79,6 +79,134 @@ public class GamesDatabaseClientTests
         );
     }
 
+    [Fact]
+    public async Task AmbiguousTimeout_ReconcilesCanonicalGameAndReturnsAppliedMutation()
+    {
+        var responseNumber = 0;
+        var handler = new RecordingHandler(_ => ++responseNumber == 1
+            ? throw new TaskCanceledException("provider timeout")
+            : JsonResponse("""{"id":7,"statusId":3,"name":"Test Game","statusName":"Finished","favorite":true}"""));
+        var client = CreateClient(handler, new StubAccessService("gdi-token"));
+
+        var result = await client.UpdateStatusAsync(Guid.NewGuid(), 7, 3, CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.Equal(3, result.StatusId);
+        Assert.True(result.Favorite);
+        Assert.Collection(
+            handler.Requests,
+            request => Assert.Equal(HttpMethod.Patch, request.Method),
+            request => Assert.Equal(HttpMethod.Get, request.Method)
+        );
+    }
+
+    [Fact]
+    public async Task AmbiguousTimeout_WhenCanonicalStateDiffers_IsReconcilableConflict()
+    {
+        var responseNumber = 0;
+        var handler = new RecordingHandler(_ => ++responseNumber == 1
+            ? throw new TaskCanceledException("provider timeout")
+            : JsonResponse("""{"id":7,"statusId":2,"name":"Test Game"}"""));
+        var client = CreateClient(handler, new StubAccessService("gdi-token"));
+
+        var exception = await Assert.ThrowsAsync<Application.Exceptions.IntegrationGatewayException>(() =>
+            client.UpdateStatusAsync(Guid.NewGuid(), 7, 3, CancellationToken.None));
+
+        Assert.Equal("mutation_unconfirmed", exception.Code);
+        Assert.True(exception.Reconcilable);
+    }
+
+    [Fact]
+    public async Task EmptyMutationResponse_ReconcilesCanonicalState()
+    {
+        var responseNumber = 0;
+        var handler = new RecordingHandler(_ => ++responseNumber == 1
+            ? new HttpResponseMessage(HttpStatusCode.NoContent)
+            : JsonResponse("""{"id":7,"statusId":3,"name":"Test Game"}"""));
+        var client = CreateClient(handler, new StubAccessService("gdi-token"));
+
+        var result = await client.UpdateStatusAsync(Guid.NewGuid(), 7, 3, CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.Equal(3, result.StatusId);
+        Assert.Equal(2, handler.Requests.Count);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.Forbidden, "permission_missing")]
+    [InlineData(HttpStatusCode.NotFound, "provider_not_found")]
+    [InlineData(HttpStatusCode.BadRequest, "provider_request_rejected")]
+    public async Task DefinitiveMutationRejection_DoesNotReconcile(HttpStatusCode status, string code)
+    {
+        var handler = new RecordingHandler(_ => new HttpResponseMessage(status));
+        var client = CreateClient(handler, new StubAccessService("gdi-token"));
+
+        var exception = await Assert.ThrowsAsync<Application.Exceptions.IntegrationGatewayException>(() =>
+            client.UpdateStatusAsync(Guid.NewGuid(), 7, 3, CancellationToken.None));
+
+        Assert.Equal(code, exception.Code);
+        Assert.False(exception.Reconcilable);
+        Assert.Single(handler.Requests);
+    }
+
+    [Fact]
+    public async Task ServerFailure_ReconcilesCanonicalState()
+    {
+        var responseNumber = 0;
+        var handler = new RecordingHandler(_ => ++responseNumber == 1
+            ? new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+            : JsonResponse("""{"id":7,"statusId":3,"name":"Test Game"}"""));
+        var client = CreateClient(handler, new StubAccessService("gdi-token"));
+
+        var result = await client.UpdateStatusAsync(Guid.NewGuid(), 7, 3, CancellationToken.None);
+
+        Assert.Equal(3, result?.StatusId);
+        Assert.Equal(2, handler.Requests.Count);
+    }
+
+    [Fact]
+    public async Task TransportFailure_ReconcilesCanonicalState()
+    {
+        var responseNumber = 0;
+        var handler = new RecordingHandler(_ => ++responseNumber == 1
+            ? throw new HttpRequestException("connection reset")
+            : JsonResponse("""{"id":7,"statusId":3,"name":"Test Game"}"""));
+        var client = CreateClient(handler, new StubAccessService("gdi-token"));
+
+        var result = await client.UpdateStatusAsync(Guid.NewGuid(), 7, 3, CancellationToken.None);
+
+        Assert.Equal(3, result?.StatusId);
+        Assert.Equal(2, handler.Requests.Count);
+    }
+
+    [Fact]
+    public async Task MalformedMutationJson_ReconcilesCanonicalState()
+    {
+        var responseNumber = 0;
+        var handler = new RecordingHandler(_ => ++responseNumber == 1
+            ? JsonResponse("{not-json")
+            : JsonResponse("""{"id":7,"statusId":3,"name":"Test Game"}"""));
+        var client = CreateClient(handler, new StubAccessService("gdi-token"));
+
+        var result = await client.UpdateStatusAsync(Guid.NewGuid(), 7, 3, CancellationToken.None);
+
+        Assert.Equal(3, result?.StatusId);
+        Assert.Equal(2, handler.Requests.Count);
+    }
+
+    [Fact]
+    public async Task ProviderAbsoluteAssetUrl_IsNotReturnedToBrowser()
+    {
+        var handler = new RecordingHandler(_ => JsonResponse("""
+            {"data":[{"id":7,"statusId":2,"name":"Test Game","cover":"https://attacker.example/track.png"}],"totalCount":1,"page":1,"pageSize":24,"totalPages":1}
+            """));
+        var client = CreateClient(handler, new StubAccessService("gdi-token"));
+
+        var result = await client.GetGamesAsync(Guid.NewGuid(), null, null, 1, 24, CancellationToken.None);
+
+        Assert.Null(Assert.Single(result.Items).Cover);
+    }
+
     private static GamesDatabaseClient CreateClient(RecordingHandler handler, StubAccessService access) =>
         new(
             new HttpClient(handler),

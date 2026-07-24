@@ -24,7 +24,8 @@ public static class AuthEndpoints
                 }
             )
             .WithName("Login")
-            .WithSummary("Authenticate and get access + refresh tokens");
+            .WithSummary("Authenticate and get access + refresh tokens")
+            .RequireRateLimiting("login");
 
         group
             .MapPost(
@@ -38,7 +39,8 @@ public static class AuthEndpoints
                 }
             )
             .WithName("Refresh")
-            .WithSummary("Rotate refresh token and get a new access token");
+            .WithSummary("Rotate refresh token and get a new access token")
+            .RequireRateLimiting("login");
 
         group
             .MapPost(
@@ -67,12 +69,46 @@ public static class AuthEndpoints
                     var email = ctx.User.FindFirst(ClaimTypes.Email)?.Value ?? string.Empty;
                     var userName = ctx.User.FindFirst(ClaimTypes.Name)?.Value ?? string.Empty;
                     var isAdmin = ctx.IsAdmin();
+                    var requiresPasswordChange = string.Equals(
+                        ctx.User.FindFirstValue(Household.Api.Models.Auth.HouseholdClaimTypes.RequiresPasswordChange),
+                        bool.TrueString,
+                        StringComparison.OrdinalIgnoreCase
+                    );
 
-                    return Results.Ok(new MeResponse(userId.Value, email, userName, isAdmin));
+                    return Results.Ok(new MeResponse(userId.Value, email, userName, isAdmin, requiresPasswordChange));
                 }
             )
             .WithName("Me")
             .WithSummary("Get current authenticated user info (reads from token — no DB roundtrip)");
+
+        authed
+            .MapPost(
+                "/change-password",
+                async (
+                    ChangePasswordRequest request,
+                    HttpContext ctx,
+                    IAuthService authService,
+                    CancellationToken cancellationToken
+                ) =>
+                {
+                    var userId = ctx.GetUserId();
+                    if (userId == null)
+                        return Results.Unauthorized();
+
+                    var error = await authService.ChangePasswordAsync(
+                        userId.Value,
+                        request.CurrentPassword,
+                        request.NewPassword,
+                        cancellationToken
+                    );
+                    return error == null
+                        ? Results.Ok(new ChangePasswordResponse("password_changed", ReauthenticationRequired: true))
+                        : Results.BadRequest(new { code = error });
+                }
+            )
+            .WithName("ChangePassword")
+            .WithSummary("Change the current user's password and revoke all sessions")
+            .RequireRateLimiting("mutation");
 
         authed
             .MapPost(

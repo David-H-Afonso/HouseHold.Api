@@ -8,15 +8,17 @@ public record AppLauncherItemDto(
     string Category,
     string? Description,
     string? IconUrl,
-    string? InternalUrl,
-    string? ExternalUrl,
     string? OpenUrl,
     bool Favorite,
     IntegrationHealthStatus HealthStatus,
+    string FrontStatus,
+    string ApiStatus,
+    string UserConnectionStatus,
     string ContainerStatus,
     string? Image,
     IReadOnlyList<string> Ports,
     DateTime? LastUpdated,
+    bool? UpdateAvailable,
     bool AdminActionsAvailable
 );
 

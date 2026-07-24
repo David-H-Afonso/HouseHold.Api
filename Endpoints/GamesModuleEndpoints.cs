@@ -69,6 +69,6 @@ public static class GamesModuleEndpoints
                 var game = await client.UpdateStatusAsync(userId.Value, id, request.StatusId, ct);
                 return game is null ? Results.NotFound() : Results.Ok(game);
             }
-        );
+        ).RequireRateLimiting("mutation");
     }
 }

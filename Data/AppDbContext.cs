@@ -17,6 +17,9 @@ public class AppDbContext : DbContext
     // ── Auth ──────────────────────────────────────────────────────────────────
     public DbSet<User> Users { get; set; }
     public DbSet<RefreshToken> RefreshTokens { get; set; }
+    public DbSet<UserPreference> UserPreferences { get; set; }
+    public DbSet<UserInvitation> UserInvitations { get; set; }
+    public DbSet<AuditEvent> AuditEvents { get; set; }
 
     // ── Food ──────────────────────────────────────────────────────────────────
     public DbSet<FoodItem> FoodItems { get; set; }
@@ -40,6 +43,7 @@ public class AppDbContext : DbContext
     public DbSet<AllowedComposeApp> AllowedComposeApps { get; set; }
     public DbSet<HouseholdConsumerConnection> HouseholdConsumerConnections { get; set; }
     public DbSet<HouseholdAuthorizationAttempt> HouseholdAuthorizationAttempts { get; set; }
+    public DbSet<UserAppFavorite> UserAppFavorites { get; set; }
 
     // ── Timestamps ────────────────────────────────────────────────────────────
 
@@ -124,6 +128,19 @@ public class AppDbContext : DbContext
                     case HouseholdAuthorizationAttempt attempt:
                         attempt.CreatedAt = now;
                         break;
+                    case UserPreference preference:
+                        preference.CreatedAt = now;
+                        preference.UpdatedAt = now;
+                        break;
+                    case UserInvitation invitation:
+                        invitation.CreatedAt = now;
+                        break;
+                    case AuditEvent auditEvent:
+                        auditEvent.CreatedAt = now;
+                        break;
+                    case UserAppFavorite favorite:
+                        favorite.CreatedAt = now;
+                        break;
                 }
             }
             else if (entry.State == EntityState.Modified)
@@ -173,6 +190,10 @@ public class AppDbContext : DbContext
                     case HouseholdConsumerConnection connection:
                         connection.UpdatedAt = now;
                         entry.Property(nameof(HouseholdConsumerConnection.CreatedAt)).IsModified = false;
+                        break;
+                    case UserPreference preference:
+                        preference.UpdatedAt = now;
+                        entry.Property(nameof(UserPreference.CreatedAt)).IsModified = false;
                         break;
                 }
             }
@@ -305,6 +326,13 @@ public class AppDbContext : DbContext
             e.HasKey(tt => tt.Id);
             e.Property(tt => tt.Title).IsRequired().HasMaxLength(200);
             e.Property(tt => tt.Description).HasMaxLength(2000);
+            e.HasIndex(tt => tt.OwnerUserId);
+
+            e.HasOne(tt => tt.OwnerUser)
+                .WithMany()
+                .HasForeignKey(tt => tt.OwnerUserId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .IsRequired(false);
 
             e.HasOne(tt => tt.Room)
                 .WithMany(r => r.TaskTemplates)
@@ -365,6 +393,51 @@ public class AppDbContext : DbContext
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        modelBuilder.Entity<UserPreference>(e =>
+        {
+            e.HasKey(preference => preference.UserId);
+            e.Property(preference => preference.TimeZoneId).HasMaxLength(128);
+            e.Property(preference => preference.VisualPreference).IsRequired().HasMaxLength(32);
+            e.Property(preference => preference.PokemonSpriteSource).IsRequired().HasMaxLength(32);
+            e.Property(preference => preference.GamesStatusOrderJson).IsRequired().HasMaxLength(4000);
+            e.Property(preference => preference.HiddenGitHubReposJson).IsRequired().HasMaxLength(4000);
+            e.Property(preference => preference.JellyfinUserId).HasMaxLength(128);
+            e.HasOne(preference => preference.User)
+                .WithOne(user => user.Preference)
+                .HasForeignKey<UserPreference>(preference => preference.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<UserInvitation>(e =>
+        {
+            e.HasKey(invitation => invitation.Id);
+            e.HasIndex(invitation => invitation.TokenHash).IsUnique();
+            e.HasIndex(invitation => new { invitation.Email, invitation.ExpiresAt });
+            e.Property(invitation => invitation.Email).IsRequired().HasMaxLength(320);
+            e.Property(invitation => invitation.UserName).IsRequired().HasMaxLength(100);
+            e.Property(invitation => invitation.TokenHash).IsRequired().HasMaxLength(64);
+            e.HasOne(invitation => invitation.CreatedByUser)
+                .WithMany()
+                .HasForeignKey(invitation => invitation.CreatedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(invitation => invitation.RedeemedUser)
+                .WithMany()
+                .HasForeignKey(invitation => invitation.RedeemedUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<AuditEvent>(e =>
+        {
+            e.HasKey(auditEvent => auditEvent.Id);
+            e.HasIndex(auditEvent => auditEvent.CreatedAt);
+            e.Property(auditEvent => auditEvent.Action).IsRequired().HasMaxLength(120);
+            e.Property(auditEvent => auditEvent.SummaryJson).HasMaxLength(4000);
+            e.HasOne(auditEvent => auditEvent.ActorUser)
+                .WithMany()
+                .HasForeignKey(auditEvent => auditEvent.ActorUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
         // ── Integrations ──────────────────────────────────────────────────────
         modelBuilder.Entity<Integration>(e =>
         {
@@ -394,13 +467,33 @@ public class AppDbContext : DbContext
         {
             e.HasKey(w => w.Id);
             e.HasIndex(w => new { w.UserId, w.Position });
+            e.HasIndex(w => new { w.UserId, w.WidgetType }).IsUnique();
             e.Property(w => w.WidgetType).IsRequired().HasMaxLength(120);
+            e.Property(w => w.Size).IsRequired().HasMaxLength(20).HasDefaultValue("medium");
+            e.Property(w => w.SchemaVersion).HasDefaultValue(1);
+
+            e.HasOne(w => w.User)
+                .WithMany()
+                .HasForeignKey(w => w.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
 
             e.HasOne(w => w.Integration)
                 .WithMany(i => i.DashboardWidgets)
                 .HasForeignKey(w => w.IntegrationId)
                 .OnDelete(DeleteBehavior.SetNull)
                 .IsRequired(false);
+        });
+
+        modelBuilder.Entity<UserAppFavorite>(e =>
+        {
+            e.HasKey(favorite => favorite.Id);
+            e.HasIndex(favorite => new { favorite.UserId, favorite.AppId }).IsUnique();
+            e.Property(favorite => favorite.AppId).IsRequired().HasMaxLength(120);
+            e.Property(favorite => favorite.Favorite).HasDefaultValue(true);
+            e.HasOne(favorite => favorite.User)
+                .WithMany(user => user.AppFavorites)
+                .HasForeignKey(favorite => favorite.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<IntegrationActionLog>(e =>

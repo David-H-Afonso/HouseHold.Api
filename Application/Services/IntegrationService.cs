@@ -8,6 +8,13 @@ namespace Household.Api.Application.Services;
 
 public class IntegrationService : IIntegrationService
 {
+    private static readonly HashSet<IntegrationType> DedicatedIntegrationTypes =
+    [
+        IntegrationType.CasaOS,
+        IntegrationType.Jellyfin,
+        IntegrationType.GitHubActions,
+    ];
+
     private readonly AppDbContext _db;
     private readonly ISecretProtector _secretProtector;
 
@@ -21,6 +28,7 @@ public class IntegrationService : IIntegrationService
     {
         var integrations = await _db
             .Integrations.Include(i => i.Secrets)
+            .Where(i => !DedicatedIntegrationTypes.Contains(i.Type))
             .OrderBy(i => i.Type)
             .ThenBy(i => i.Name)
             .ToListAsync(cancellationToken);
@@ -32,7 +40,12 @@ public class IntegrationService : IIntegrationService
     {
         var integration = await _db
             .Integrations.Include(i => i.Secrets)
-            .FirstOrDefaultAsync(i => i.Id == id, cancellationToken);
+            .FirstOrDefaultAsync(
+                i =>
+                    i.Id == id
+                    && !DedicatedIntegrationTypes.Contains(i.Type),
+                cancellationToken
+            );
 
         return integration is null ? null : ToResponse(integration);
     }
@@ -42,6 +55,8 @@ public class IntegrationService : IIntegrationService
         CancellationToken cancellationToken
     )
     {
+        RequireGenericIntegration(request.Type);
+
         var now = DateTime.UtcNow;
         var integration = new Integration
         {
@@ -71,6 +86,8 @@ public class IntegrationService : IIntegrationService
             .FirstOrDefaultAsync(i => i.Id == id, cancellationToken);
         if (integration is null)
             return null;
+        RequireGenericIntegration(integration.Type);
+        RequireGenericIntegration(request.Type);
 
         var now = DateTime.UtcNow;
         integration.Type = request.Type;
@@ -90,6 +107,7 @@ public class IntegrationService : IIntegrationService
         var integration = await _db.Integrations.FindAsync([id], cancellationToken);
         if (integration is null)
             return false;
+        RequireGenericIntegration(integration.Type);
 
         _db.Integrations.Remove(integration);
         await _db.SaveChangesAsync(cancellationToken);
@@ -133,7 +151,6 @@ public class IntegrationService : IIntegrationService
             integration.Id,
             integration.Type,
             integration.Name,
-            integration.BaseUrl,
             integration.OpenUrl,
             integration.Enabled,
             integration.LastHealthStatus,
@@ -145,4 +162,10 @@ public class IntegrationService : IIntegrationService
 
     private static string? NormalizeOptional(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static void RequireGenericIntegration(IntegrationType type)
+    {
+        if (DedicatedIntegrationTypes.Contains(type))
+            throw new ArgumentException($"{type} configuration uses its dedicated admin endpoint.");
+    }
 }

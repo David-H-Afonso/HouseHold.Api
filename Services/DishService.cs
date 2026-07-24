@@ -26,12 +26,12 @@ public class DishService : IDishService
         return dishes.Select(ToDto).ToList();
     }
 
-    public async Task<DishTemplateDto?> GetByIdAsync(Guid id)
+    public async Task<DishTemplateDto?> GetByIdAsync(Guid id, Guid requestingUserId)
     {
         var dish = await _context
             .DishTemplates.Include(d => d.Items)
                 .ThenInclude(i => i.FoodItem)
-            .FirstOrDefaultAsync(d => d.Id == id);
+            .FirstOrDefaultAsync(d => d.Id == id && (d.IsShared || d.OwnerUserId == null || d.OwnerUserId == requestingUserId));
 
         return dish == null ? null : ToDto(dish);
     }
@@ -64,7 +64,7 @@ public class DishService : IDishService
         await _context.SaveChangesAsync();
 
         // Reload with navigation props
-        return (await GetByIdAsync(dish.Id))!;
+        return (await GetByIdAsync(dish.Id, ownerUserId))!;
     }
 
     public async Task<DishTemplateDto?> UpdateAsync(Guid id, UpdateDishTemplateRequest request, Guid requestingUserId)
@@ -99,7 +99,7 @@ public class DishService : IDishService
         }
 
         await _context.SaveChangesAsync();
-        return await GetByIdAsync(id);
+        return await GetByIdAsync(id, requestingUserId);
     }
 
     public async Task<bool> DeleteAsync(Guid id, Guid requestingUserId)

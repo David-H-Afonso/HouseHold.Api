@@ -8,10 +8,13 @@ public interface IBeastVaultClient
         Guid userId,
         string? search,
         IReadOnlyList<int> tagIds,
+        string spriteSource,
         int skip,
         int take,
         CancellationToken cancellationToken
     );
 
     Task<IReadOnlyList<PokemonTagFilterDto>> GetTagsAsync(Guid userId, CancellationToken cancellationToken);
+    Task<(byte[] Content, string ContentType)?> GetSpriteAsync(Guid userId, int speciesId, bool shiny, string source, CancellationToken cancellationToken);
+    Task<(byte[] Content, string ContentType, string FileName)?> DownloadPokemonAsync(Guid userId, int id, CancellationToken cancellationToken);
 }

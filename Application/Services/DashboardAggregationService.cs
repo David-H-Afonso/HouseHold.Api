@@ -19,7 +19,7 @@ public class DashboardAggregationService : IDashboardAggregationService
     public async Task<DashboardResponse> GetDashboardAsync(Guid userId, CancellationToken cancellationToken)
     {
         var widgets = await _db
-            .DashboardWidgets.Where(w => w.UserId == userId && w.Enabled)
+            .DashboardWidgets.Where(w => w.UserId == userId)
             .OrderBy(w => w.Position)
             .Select(w => new DashboardWidgetDto(w.Id, w.WidgetType, w.IntegrationId, w.Position, w.Enabled, w.SettingsJson))
             .ToListAsync(cancellationToken);

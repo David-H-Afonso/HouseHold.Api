@@ -34,26 +34,28 @@ public class ErrorHandlingMiddleware
     {
         context.Response.ContentType = "application/json";
 
-        var (statusCode, message, details) = exception switch
+        (int statusCode, string message, string? details, string code, bool reconcilable) = exception switch
         {
             IntegrationGatewayException gatewayException => (
                 (int)gatewayException.StatusCode,
                 gatewayException.Message,
-                null
+                (string?)null,
+                gatewayException.Code,
+                gatewayException.Reconcilable
             ),
             DbUpdateException { InnerException: SqliteException sqEx } => sqEx.SqliteErrorCode == 19
-                ? ((int)HttpStatusCode.Conflict, "Conflict: duplicate or constraint violation", null)
-                : ((int)HttpStatusCode.BadRequest, "Database error", null),
+                ? ((int)HttpStatusCode.Conflict, "Conflict: duplicate or constraint violation", null, "conflict", false)
+                : ((int)HttpStatusCode.BadRequest, "Database error", null, "database_error", false),
 
-            DbUpdateException => ((int)HttpStatusCode.BadRequest, "Error saving data", null),
+            DbUpdateException => ((int)HttpStatusCode.BadRequest, "Error saving data", null, "database_error", false),
 
-            ArgumentException argEx => ((int)HttpStatusCode.BadRequest, "Invalid data", argEx.Message),
+            ArgumentException => ((int)HttpStatusCode.BadRequest, "Invalid data", null, "invalid_request", false),
 
-            UnauthorizedAccessException uaEx => ((int)HttpStatusCode.Forbidden, "Access denied", uaEx.Message),
+            UnauthorizedAccessException => ((int)HttpStatusCode.Forbidden, "Access denied", null, "forbidden", false),
 
-            KeyNotFoundException knfEx => ((int)HttpStatusCode.NotFound, "Resource not found", knfEx.Message),
+            KeyNotFoundException => ((int)HttpStatusCode.NotFound, "Resource not found", null, "not_found", false),
 
-            _ => ((int)HttpStatusCode.InternalServerError, "An unexpected error occurred", null),
+            _ => ((int)HttpStatusCode.InternalServerError, "An unexpected error occurred", null, "unexpected_error", false),
         };
 
         context.Response.StatusCode = statusCode;
@@ -63,6 +65,8 @@ public class ErrorHandlingMiddleware
                 statusCode,
                 message,
                 details,
+                code,
+                reconcilable,
             },
             new JsonSerializerOptions
             {

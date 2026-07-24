@@ -14,6 +14,17 @@ public record GameModuleItemDto(
     string? Finished,
     int? SteamAppId,
     int? SteamPlaytimeForever,
+    bool Favorite,
+    string? Released,
+    string? Comment,
+    int? Critic,
+    string? CriticProvider,
+    int? Story,
+    int? Completion,
+    string? PlayedStatusName,
+    IReadOnlyList<string> PlayWithNames,
+    DateTime? CreatedAt,
+    DateTime? UpdatedAt,
     string? OpenUrl
 );
 

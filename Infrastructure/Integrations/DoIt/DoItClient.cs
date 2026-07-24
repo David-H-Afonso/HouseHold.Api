@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Household.Api.Application.Interfaces;
 using Household.Api.DTOs;
 
@@ -6,9 +7,11 @@ namespace Household.Api.Infrastructure.Integrations.DoIt;
 public sealed class DoItClient(HttpClient httpClient, IHouseholdProviderAccessService connectionAccess)
     : HouseholdProviderClientBase(httpClient, connectionAccess, "doit", "DoIt"), IDoItClient
 {
-    public async Task<DoItNowDto> GetNowAsync(Guid userId, string? date, CancellationToken cancellationToken)
+    private static readonly ConcurrentDictionary<(Guid UserId, Guid OccurrenceId), OccurrenceContext> OccurrenceContexts = new();
+
+    public async Task<DoItNowDto> GetNowAsync(Guid userId, string date, string timeZoneId, CancellationToken cancellationToken)
     {
-        var query = BuildQuery(new Dictionary<string, string?> { ["date"] = date });
+        var query = BuildQuery(new Dictionary<string, string?> { ["date"] = date, ["timeZoneId"] = timeZoneId });
         var source = await GetRequiredAsync<SourceNow>(
             userId,
             "tasks.read",
@@ -25,6 +28,11 @@ public sealed class DoItClient(HttpClient httpClient, IHouseholdProviderAccessSe
             tasks.AddRange(zone.Completed.Select(task => ToDto(task, "Completed")));
         }
         tasks.AddRange(source.Upcoming.Select(task => ToDto(task, "Upcoming")));
+        var expiresAt = DateTime.UtcNow.AddHours(1);
+        foreach (var task in tasks)
+            OccurrenceContexts[(userId, task.OccurrenceId)] = new(task.OccurrenceDate, timeZoneId, expiresAt);
+        foreach (var expired in OccurrenceContexts.Where(pair => pair.Value.ExpiresAt <= DateTime.UtcNow))
+            OccurrenceContexts.TryRemove(expired.Key, out _);
 
         return new DoItNowDto(
             source.Date,
@@ -40,27 +48,97 @@ public sealed class DoItClient(HttpClient httpClient, IHouseholdProviderAccessSe
         );
     }
 
-    public Task<DoItOccurrenceActionDto> CompleteOccurrenceAsync(
+    public async Task<DoItOccurrenceActionDto> CompleteOccurrenceAsync(
         Guid userId,
         Guid occurrenceId,
+        string? occurrenceDate,
+        string timeZoneId,
         CancellationToken cancellationToken
-    ) => PostRequiredAsync<DoItOccurrenceActionDto>(
+    ) => await ApplyOccurrenceActionAsync(
         userId,
+        occurrenceId,
+        occurrenceDate,
+        timeZoneId,
+        "complete",
         "tasks.complete",
-        $"/api/integrations/household/v1/occurrences/{occurrenceId}/complete",
-        cancellationToken
-    );
+        "Done",
+        cancellationToken);
 
-    public Task<DoItOccurrenceActionDto> UndoOccurrenceAsync(
+    public async Task<DoItOccurrenceActionDto> UndoOccurrenceAsync(
         Guid userId,
         Guid occurrenceId,
+        string? occurrenceDate,
+        string timeZoneId,
         CancellationToken cancellationToken
-    ) => PostRequiredAsync<DoItOccurrenceActionDto>(
+    ) => await ApplyOccurrenceActionAsync(
         userId,
+        occurrenceId,
+        occurrenceDate,
+        timeZoneId,
+        "undo",
         "tasks.undo",
-        $"/api/integrations/household/v1/occurrences/{occurrenceId}/undo",
-        cancellationToken
-    );
+        "Pending",
+        cancellationToken);
+
+    private async Task<DoItOccurrenceActionDto> ApplyOccurrenceActionAsync(
+        Guid userId,
+        Guid occurrenceId,
+        string? occurrenceDate,
+        string timeZoneId,
+        string action,
+        string scope,
+        string desiredStatus,
+        CancellationToken cancellationToken
+    )
+    {
+        var context = ResolveOccurrenceContext(userId, occurrenceId, occurrenceDate, timeZoneId);
+        var query = BuildQuery(new Dictionary<string, string?>
+        {
+            ["date"] = context.Date,
+            ["timeZoneId"] = context.TimeZoneId,
+        });
+        try
+        {
+            return await PostRequiredAsync<DoItOccurrenceActionDto>(
+                userId,
+                scope,
+                $"/api/integrations/household/v1/occurrences/{occurrenceId}/{action}{query}",
+                cancellationToken
+            );
+        }
+        catch (Application.Exceptions.IntegrationGatewayException exception) when (exception.Code == "ambiguous_timeout")
+        {
+            var canonical = (await GetNowAsync(userId, context.Date, context.TimeZoneId, cancellationToken)).Tasks
+                .SingleOrDefault(task => task.OccurrenceId == occurrenceId);
+            if (canonical is not null && string.Equals(canonical.OccurrenceStatus, desiredStatus, StringComparison.OrdinalIgnoreCase))
+                return new DoItOccurrenceActionDto(canonical.OccurrenceId, canonical.Id, canonical.OccurrenceDate, canonical.OccurrenceStatus);
+            throw new Application.Exceptions.IntegrationGatewayException(
+                System.Net.HttpStatusCode.Conflict,
+                "DoIt did not confirm the requested action.",
+                "mutation_unconfirmed",
+                reconcilable: true
+            );
+        }
+    }
+
+    private static OccurrenceContext ResolveOccurrenceContext(
+        Guid userId,
+        Guid occurrenceId,
+        string? occurrenceDate,
+        string timeZoneId)
+    {
+        if (!string.IsNullOrWhiteSpace(occurrenceDate))
+            return new OccurrenceContext(occurrenceDate, timeZoneId, DateTime.UtcNow.AddHours(1));
+        if (OccurrenceContexts.TryGetValue((userId, occurrenceId), out var context) && context.ExpiresAt > DateTime.UtcNow)
+            return context;
+
+        throw new Application.Exceptions.IntegrationGatewayException(
+            System.Net.HttpStatusCode.Conflict,
+            "Reload DoIt tasks before applying this action.",
+            "occurrence_context_missing",
+            reconcilable: true
+        );
+    }
 
     private static DoItNowTaskDto ToDto(SourceTask task, string state) =>
         new(
@@ -74,7 +152,14 @@ public sealed class DoItClient(HttpClient httpClient, IHouseholdProviderAccessSe
             task.OccurrenceDate,
             task.AvailableFromTime,
             task.AvailableUntilTime,
-            task.RecommendedTime
+            task.RecommendedTime,
+            task.AssignmentMode,
+            task.AssigneeIds,
+            task.AssigneeNames,
+            task.TimeZoneId,
+            task.RecurrenceType,
+            task.CompletedAt,
+            task.CompletedByUserId
         );
 
     private sealed class SourceNow
@@ -115,5 +200,14 @@ public sealed class DoItClient(HttpClient httpClient, IHouseholdProviderAccessSe
         public string? AvailableFromTime { get; set; }
         public string? AvailableUntilTime { get; set; }
         public string? RecommendedTime { get; set; }
+        public string AssignmentMode { get; set; } = string.Empty;
+        public List<Guid> AssigneeIds { get; set; } = [];
+        public List<string> AssigneeNames { get; set; } = [];
+        public string TimeZoneId { get; set; } = "UTC";
+        public string RecurrenceType { get; set; } = "Manual";
+        public DateTime? CompletedAt { get; set; }
+        public Guid? CompletedByUserId { get; set; }
     }
+
+    private sealed record OccurrenceContext(string Date, string TimeZoneId, DateTime ExpiresAt);
 }

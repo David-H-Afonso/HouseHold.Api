@@ -7,6 +7,7 @@ namespace Household.Api.Infrastructure.AppLauncher;
 
 public class AppLauncherConfigLoader : IAppLauncherConfigLoader
 {
+    private const long MaxConfigBytes = 1024 * 1024;
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
 
     private readonly AppLauncherSettings _settings;
@@ -25,7 +26,13 @@ public class AppLauncherConfigLoader : IAppLauncherConfigLoader
 
         try
         {
-            await using var stream = File.OpenRead(_settings.ConfigPath);
+            var file = new FileInfo(_settings.ConfigPath);
+            if (file.Length > MaxConfigBytes)
+            {
+                _logger.LogWarning("App launcher config exceeds the {MaxBytes} byte limit at {Path}", MaxConfigBytes, _settings.ConfigPath);
+                return [];
+            }
+            await using var stream = file.OpenRead();
             var items = await JsonSerializer.DeserializeAsync<List<AppLauncherConfigItem>>(
                 stream,
                 JsonOptions,
@@ -33,6 +40,7 @@ public class AppLauncherConfigLoader : IAppLauncherConfigLoader
             );
 
             return (items ?? [])
+                .Take(20)
                 .Where(item => !string.IsNullOrWhiteSpace(item.Id) && !string.IsNullOrWhiteSpace(item.Name))
                 .ToList();
         }

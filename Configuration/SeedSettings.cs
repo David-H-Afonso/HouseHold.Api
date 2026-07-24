@@ -7,6 +7,6 @@ public class SeedSettings
     public bool AdminEnabled { get; set; } = false;
     public string AdminEmail { get; set; } = "admin@local";
     public string AdminUsername { get; set; } = "admin";
-    public string AdminPassword { get; set; } = "Admin123!123!";
+    public string AdminPassword { get; set; } = string.Empty;
     public bool DemoDataEnabled { get; set; } = false;
 }

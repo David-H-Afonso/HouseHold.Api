@@ -26,9 +26,11 @@ public static class DishEndpoints
         group
             .MapGet(
                 "/{id:guid}",
-                async (Guid id, IDishService service) =>
+                async (Guid id, IDishService service, HttpContext ctx) =>
                 {
-                    var dish = await service.GetByIdAsync(id);
+                    var userId = ctx.GetUserId();
+                    if (userId is null) return Results.Unauthorized();
+                    var dish = await service.GetByIdAsync(id, userId.Value);
                     return dish == null ? Results.NotFound() : Results.Ok(dish);
                 }
             )

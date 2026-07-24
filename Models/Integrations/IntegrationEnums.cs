@@ -14,6 +14,7 @@ public enum IntegrationType
     WgEasy = 10,
     WarcraftArchive = 11,
     BeastVault = 12,
+    GitHubActions = 13,
 }
 
 public enum IntegrationHealthStatus

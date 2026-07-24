@@ -13,7 +13,14 @@ public record DoItNowTaskDto(
     string OccurrenceDate,
     string? AvailableFromTime,
     string? AvailableUntilTime,
-    string? RecommendedTime
+    string? RecommendedTime,
+    string AssignmentMode,
+    IReadOnlyList<Guid> AssigneeIds,
+    IReadOnlyList<string> AssigneeNames,
+    string TimeZoneId,
+    string RecurrenceType,
+    DateTime? CompletedAt,
+    Guid? CompletedByUserId
 );
 
 public record DoItNowDto(

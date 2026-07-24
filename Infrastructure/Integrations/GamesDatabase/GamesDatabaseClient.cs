@@ -91,15 +91,31 @@ public class GamesDatabaseClient : IGamesDatabaseClient
         CancellationToken cancellationToken
     )
     {
-        var game = await SendAsync<GameDto>(
-            userId,
-            "games.status.write",
-            HttpMethod.Patch,
-            $"/api/games/{id}/status",
-            new { statusId },
-            cancellationToken
-        );
-        return game is null ? null : ToModuleItem(game);
+        try
+        {
+            var game = await SendAsync<GameDto>(
+                userId,
+                "games.status.write",
+                HttpMethod.Patch,
+                $"/api/games/{id}/status",
+                new { statusId },
+                cancellationToken
+            );
+            return game is null ? null : ToModuleItem(game);
+        }
+        catch (IntegrationGatewayException exception) when (
+            exception.Code is "ambiguous_timeout" or "ambiguous_transport" or "ambiguous_response" or "invalid_provider_response"
+        )
+        {
+            var canonical = await GetGameAsync(userId, id, cancellationToken);
+            if (canonical?.StatusId == statusId) return canonical;
+            throw new IntegrationGatewayException(
+                HttpStatusCode.Conflict,
+                "Games Database did not confirm the requested status.",
+                "mutation_unconfirmed",
+                reconcilable: true
+            );
+        }
     }
 
     public async Task<IReadOnlyList<GameStatusOptionDto>> GetStatusesAsync(
@@ -163,7 +179,7 @@ public class GamesDatabaseClient : IGamesDatabaseClient
         if (access.Status != HouseholdProviderAccessStatus.Success || access.AccessToken is null || access.BaseUrl is null)
             throw ToGatewayException(access.Status);
 
-        using var request = new HttpRequestMessage(method, $"{access.BaseUrl.TrimEnd('/')}{path}");
+        using var request = new HttpRequestMessage(method, BuildRequestUri(access.BaseUrl, path));
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", access.AccessToken);
         if (body is not null)
         {
@@ -175,6 +191,24 @@ public class GamesDatabaseClient : IGamesDatabaseClient
         try
         {
             response = await _httpClient.SendAsync(request, cancellationToken);
+        }
+        catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested && method != HttpMethod.Get)
+        {
+            throw new IntegrationGatewayException(
+                HttpStatusCode.Conflict,
+                "Games Database may have applied the change; canonical state must be checked.",
+                "ambiguous_timeout",
+                reconcilable: true
+            );
+        }
+        catch (HttpRequestException) when (method != HttpMethod.Get)
+        {
+            throw new IntegrationGatewayException(
+                HttpStatusCode.Conflict,
+                "Games Database may have applied the change; canonical state must be checked.",
+                "ambiguous_transport",
+                reconcilable: true
+            );
         }
         catch (Exception exception) when (
             exception is HttpRequestException
@@ -198,26 +232,55 @@ public class GamesDatabaseClient : IGamesDatabaseClient
                     failedTokenVersion: access.TokenVersion
                 );
             }
-            if (response.StatusCode == HttpStatusCode.NotFound)
-                return default;
             if (response.StatusCode == HttpStatusCode.Forbidden)
-                throw new IntegrationGatewayException(HttpStatusCode.Forbidden, "Games Database denied this operation.");
+                throw new IntegrationGatewayException(HttpStatusCode.Forbidden, "Games Database denied this operation.", "permission_missing");
             if (response.StatusCode == HttpStatusCode.Unauthorized)
                 throw new IntegrationGatewayException(HttpStatusCode.Conflict, "Reconnect Games Database to continue.");
+            if (response.StatusCode == HttpStatusCode.NotFound)
+            {
+                if (method == HttpMethod.Get) return default;
+                throw new IntegrationGatewayException(HttpStatusCode.NotFound, "Games Database game was not found.", "provider_not_found");
+            }
             if (!response.IsSuccessStatusCode)
-                throw new IntegrationGatewayException(HttpStatusCode.BadGateway, "Games Database request failed.");
+            {
+                var ambiguous = method != HttpMethod.Get && (int)response.StatusCode >= 500;
+                throw new IntegrationGatewayException(
+                    method == HttpMethod.Get
+                        ? HttpStatusCode.BadGateway
+                        : ambiguous ? HttpStatusCode.Conflict : response.StatusCode,
+                    "Games Database request failed.",
+                    method == HttpMethod.Get
+                        ? "provider_request_failed"
+                        : ambiguous ? "ambiguous_response" : "provider_request_rejected",
+                    reconcilable: ambiguous
+                );
+            }
 
             if (response.Content.Headers.ContentLength == 0)
-                return default;
+            {
+                if (method == HttpMethod.Get) return default;
+                throw new IntegrationGatewayException(
+                    HttpStatusCode.Conflict,
+                    "Games Database returned an empty mutation response.",
+                    "ambiguous_response",
+                    reconcilable: true
+                );
+            }
 
             try
             {
+                await response.Content.LoadIntoBufferAsync(1024 * 1024, cancellationToken);
                 var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
                 return await JsonSerializer.DeserializeAsync<T>(stream, JsonOptions, cancellationToken);
             }
-            catch (JsonException)
+            catch (Exception exception) when (exception is JsonException or HttpRequestException or NotSupportedException)
             {
-                throw new IntegrationGatewayException(HttpStatusCode.BadGateway, "Games Database returned an invalid response.");
+                throw new IntegrationGatewayException(
+                    method == HttpMethod.Get ? HttpStatusCode.BadGateway : HttpStatusCode.Conflict,
+                    "Games Database returned an invalid response.",
+                    "invalid_provider_response",
+                    reconcilable: method != HttpMethod.Get
+                );
             }
         }
     }
@@ -234,8 +297,8 @@ public class GamesDatabaseClient : IGamesDatabaseClient
 
     private string? BuildOpenUrl(int id)
     {
-        var openUrl = _settings.OpenUrl?.TrimEnd('/');
-        return string.IsNullOrWhiteSpace(openUrl) ? null : $"{openUrl}/#/games/{id}";
+        var openUrl = NormalizePublicBaseUrl();
+        return openUrl is null ? null : $"{openUrl}/#/games/{id}";
     }
 
     private static string BuildQuery(Dictionary<string, string?> values)
@@ -262,6 +325,17 @@ public class GamesDatabaseClient : IGamesDatabaseClient
             game.Finished,
             game.SteamAppId,
             game.SteamPlaytimeForever,
+            game.Favorite,
+            game.Released,
+            game.Comment,
+            game.Critic,
+            game.CriticProvider,
+            game.Story,
+            game.Completion,
+            game.PlayedStatusName,
+            game.PlayWithNames,
+            game.CreatedAt,
+            game.UpdatedAt,
             BuildOpenUrl(game.Id)
         );
 
@@ -269,13 +343,39 @@ public class GamesDatabaseClient : IGamesDatabaseClient
     {
         if (string.IsNullOrWhiteSpace(path))
             return null;
-        if (Uri.TryCreate(path, UriKind.Absolute, out var absolute))
-            return absolute.Scheme is "http" or "https" && string.IsNullOrEmpty(absolute.UserInfo)
-                ? absolute.ToString()
-                : null;
+        if (Uri.TryCreate(path, UriKind.Absolute, out _)) return null;
 
-        var openUrl = _settings.OpenUrl?.TrimEnd('/');
-        return string.IsNullOrWhiteSpace(openUrl) ? null : $"{openUrl}/{path.TrimStart('/')}";
+        var openUrl = NormalizePublicBaseUrl();
+        if (openUrl is null || !Uri.TryCreate(openUrl + "/", UriKind.Absolute, out var origin)
+            || !Uri.TryCreate(origin, path.TrimStart('/'), out var combined)
+            || !string.Equals(origin.Scheme, combined.Scheme, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(origin.Host, combined.Host, StringComparison.OrdinalIgnoreCase)
+            || origin.Port != combined.Port)
+            return null;
+        return combined.ToString();
+    }
+
+    private string? NormalizePublicBaseUrl()
+    {
+        var candidate = _settings.OpenUrl?.Trim().TrimEnd('/');
+        return Uri.TryCreate(candidate, UriKind.Absolute, out var uri)
+            && uri.Scheme is "http" or "https"
+            && string.IsNullOrEmpty(uri.UserInfo)
+                ? candidate
+                : null;
+    }
+
+    private static Uri BuildRequestUri(string baseUrl, string path)
+    {
+        if (Uri.TryCreate(path, UriKind.Absolute, out _)
+            || path.StartsWith("//", StringComparison.Ordinal)
+            || !Uri.TryCreate(baseUrl.TrimEnd('/') + "/", UriKind.Absolute, out var origin)
+            || !Uri.TryCreate(origin, path.TrimStart('/'), out var combined)
+            || !string.Equals(origin.Scheme, combined.Scheme, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(origin.Host, combined.Host, StringComparison.OrdinalIgnoreCase)
+            || origin.Port != combined.Port)
+            throw new IntegrationGatewayException(HttpStatusCode.BadGateway, "Games Database path is invalid.", "invalid_provider_path");
+        return combined;
     }
 
     private sealed class PagedGamesResponse
@@ -293,15 +393,26 @@ public class GamesDatabaseClient : IGamesDatabaseClient
         public int StatusId { get; set; }
         public string Name { get; set; } = string.Empty;
         public int? Grade { get; set; }
+        public int? Critic { get; set; }
+        public string? CriticProvider { get; set; }
+        public int? Story { get; set; }
+        public int? Completion { get; set; }
         public decimal? Score { get; set; }
         public string? PlatformName { get; set; }
         public string? Started { get; set; }
         public string? Finished { get; set; }
+        public string? Released { get; set; }
+        public string? Comment { get; set; }
         public string? Logo { get; set; }
         public string? Cover { get; set; }
         public int? SteamAppId { get; set; }
         public int? SteamPlaytimeForever { get; set; }
         public string? StatusName { get; set; }
+        public bool Favorite { get; set; }
+        public string? PlayedStatusName { get; set; }
+        public List<string> PlayWithNames { get; set; } = [];
+        public DateTime? CreatedAt { get; set; }
+        public DateTime? UpdatedAt { get; set; }
     }
 
     private sealed class GameStatusDto

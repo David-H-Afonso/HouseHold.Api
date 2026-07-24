@@ -15,6 +15,9 @@ using Household.Api.Infrastructure.Integrations.Docker;
 using Household.Api.Infrastructure.Integrations.GamesDatabase;
 using Household.Api.Infrastructure.Integrations.Jellywatch;
 using Household.Api.Infrastructure.Integrations.WarcraftArchive;
+using Household.Api.Infrastructure.Integrations.Jellyfin;
+using Household.Api.Infrastructure.Integrations.GitHub;
+using Household.Api.Infrastructure.Integrations.CasaOs;
 using Household.Api.Middleware;
 using Household.Api.Models.Auth;
 using Household.Api.Operations;
@@ -26,6 +29,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = 1024 * 1024);
 
 // ── Env vars: .NET Core already calls AddEnvironmentVariables() in CreateBuilder.
 // Native nested format: JwtSettings__SecretKey, CorsSettings__AllowedOrigins__0, etc.
@@ -40,7 +44,7 @@ if (File.Exists(envFilePath))
         if (string.IsNullOrWhiteSpace(line) || line.StartsWith('#'))
             continue;
         var parts = line.Split('=', 2);
-        if (parts.Length == 2)
+        if (parts.Length == 2 && Environment.GetEnvironmentVariable(parts[0].Trim()) is null)
             Environment.SetEnvironmentVariable(parts[0].Trim(), parts[1].Trim());
     }
 }
@@ -74,6 +78,14 @@ ApplyEnvOverride(
     "HouseholdConnectionSettings:DataProtectionKeysPath",
     "DATA_PROTECTION_KEYS_PATH"
 );
+ApplyEnvOverrideInt(builder.Configuration, "ExternalIntegrationSettings:GitHubPollSeconds", "GITHUB_ACTIONS_POLL_SECONDS");
+ApplyEnvOverrideInt(builder.Configuration, "ExternalIntegrationSettings:GitHubConcurrency", "GITHUB_ACTIONS_CONCURRENCY");
+ApplyEnvOverride(builder.Configuration, "ExternalIntegrationSettings:WarcraftStatusPathTemplate", "WARCRAFT_STATUS_PATH_TEMPLATE");
+ApplyEnvOverride(builder.Configuration, "ExternalIntegrationSettings:PokemonDownloadPathTemplate", "POKEMON_DOWNLOAD_PATH_TEMPLATE");
+ApplyEnvOverride(builder.Configuration, "CasaOsUpdateSettings:BackupRoot", "CASAOS_COMPOSE_BACKUP_ROOT");
+ApplyEnvOverrideInt(builder.Configuration, "CasaOsUpdateSettings:RequestTimeoutSeconds", "CASAOS_UPDATE_TIMEOUT_SECONDS");
+ApplyEnvOverrideInt(builder.Configuration, "CasaOsUpdateSettings:MaxYamlBytes", "CASAOS_MAX_YAML_BYTES");
+ApplyEnvOverrideInt(builder.Configuration, "CasaOsUpdateSettings:MaxJsonBytes", "CASAOS_MAX_JSON_BYTES");
 ApplyEnvOverride(builder.Configuration, "HouseholdConnectionSettings:DoItBaseUrl", "DOIT_BASE_URL");
 ApplyEnvOverride(builder.Configuration, "HouseholdConnectionSettings:DoItOpenUrl", "DOIT_OPEN_URL");
 ApplyEnvOverride(
@@ -135,6 +147,12 @@ builder.Services.Configure<GamesDatabaseSettings>(builder.Configuration.GetSecti
 builder.Services.Configure<HouseholdConnectionSettings>(
     builder.Configuration.GetSection(HouseholdConnectionSettings.SectionName)
 );
+builder.Services.Configure<ExternalIntegrationSettings>(
+    builder.Configuration.GetSection(ExternalIntegrationSettings.SectionName)
+);
+builder.Services.Configure<CasaOsUpdateSettings>(
+    builder.Configuration.GetSection(CasaOsUpdateSettings.SectionName)
+);
 
 // ── Database ──────────────────────────────────────────────────────────────────
 var dbSettings = builder.Configuration.GetSection(DatabaseSettings.SectionName).Get<DatabaseSettings>() ?? new();
@@ -188,6 +206,40 @@ builder
                     logger.LogError(ctx.Exception, "JWT authentication failed");
                 return Task.CompletedTask;
             },
+            OnTokenValidated = async ctx =>
+            {
+                var userId = ctx.Principal?.FindFirstValue(ClaimTypes.NameIdentifier);
+                var version = ctx.Principal?.FindFirstValue(HouseholdClaimTypes.SessionVersion);
+                if (!Guid.TryParse(userId, out var parsedUserId) || !int.TryParse(version, out var parsedVersion))
+                {
+                    ctx.Fail("Session is invalid.");
+                    return;
+                }
+                var db = ctx.HttpContext.RequestServices.GetRequiredService<AppDbContext>();
+                var userState = await db.Users
+                    .AsNoTracking()
+                    .Where(user => user.Id == parsedUserId && user.IsActive)
+                    .Select(user => new { user.SessionVersion, user.RequiresPasswordChange })
+                    .SingleOrDefaultAsync(ctx.HttpContext.RequestAborted);
+                if (userState is null || userState.SessionVersion != parsedVersion)
+                {
+                    ctx.Fail("Session is no longer valid.");
+                    return;
+                }
+
+                if (ctx.Principal?.Identity is ClaimsIdentity identity)
+                {
+                    var existingClaim = identity.FindFirst(HouseholdClaimTypes.RequiresPasswordChange);
+                    if (existingClaim is not null)
+                        identity.RemoveClaim(existingClaim);
+                    identity.AddClaim(
+                        new Claim(
+                            HouseholdClaimTypes.RequiresPasswordChange,
+                            userState.RequiresPasswordChange.ToString().ToLowerInvariant()
+                        )
+                    );
+                }
+            },
         };
     });
 
@@ -212,6 +264,30 @@ builder.Services.AddRateLimiter(options =>
                     }
             )
     );
+    static FixedWindowRateLimiterOptions Window(int permits, TimeSpan window) => new()
+    {
+        PermitLimit = permits,
+        Window = window,
+        QueueLimit = 0,
+        AutoReplenishment = true,
+    };
+    options.AddPolicy("login", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => Window(10, TimeSpan.FromMinutes(5))));
+    options.AddPolicy("invite", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => Window(10, TimeSpan.FromMinutes(10))));
+    options.AddPolicy("admin", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "unknown", _ => Window(30, TimeSpan.FromMinutes(1))));
+    options.AddPolicy("mutation", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "unknown", _ => Window(60, TimeSpan.FromMinutes(1))));
+    options.AddPolicy("app-read", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "unknown", _ => Window(4, TimeSpan.FromMinutes(1))));
+    options.AddPolicy("asset", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "unknown", _ => Window(60, TimeSpan.FromMinutes(1))));
+    options.AddPolicy("download", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "unknown", _ => Window(10, TimeSpan.FromMinutes(1))));
+    options.AddPolicy("casaos-admin-action", context => RateLimitPartition.GetFixedWindowLimiter(
+        $"{context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "unknown"}:{context.Request.RouteValues["appId"] ?? "unknown"}",
+        _ => Window(2, TimeSpan.FromMinutes(10))));
     options.AddPolicy(
         "integration-callback",
         context =>
@@ -333,24 +409,41 @@ builder.Services.AddScoped<IIntegrationService, IntegrationService>();
 builder.Services.AddScoped<IIntegrationHealthService, IntegrationHealthService>();
 builder.Services.AddScoped<IDashboardAggregationService, DashboardAggregationService>();
 builder.Services.AddScoped<IIntegrationActionLogService, IntegrationActionLogService>();
+builder.Services.AddScoped<IUserSettingsService, UserSettingsService>();
+builder.Services.AddScoped<IUserAdministrationService, UserAdministrationService>();
 builder.Services.AddScoped<IAppLauncherConfigLoader, AppLauncherConfigLoader>();
 builder.Services.AddScoped<IAppCatalogService, AppCatalogService>();
 builder.Services.AddScoped<IDockerClient, DockerClient>();
 builder.Services.AddScoped<IContainerStatusService, ContainerStatusService>();
-builder.Services.AddHttpClient<IDoItClient, DoItClient>();
-builder.Services.AddHttpClient<IGamesDatabaseClient, GamesDatabaseClient>();
-builder.Services.AddHttpClient<IJellywatchClient, JellywatchClient>();
-builder.Services.AddHttpClient<IBeastVaultClient, BeastVaultClient>();
-builder.Services.AddHttpClient<IWarcraftArchiveClient, WarcraftArchiveClient>();
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddTransient<CorrelationIdHandler>();
+builder.Services.ConfigureHttpClientDefaults(
+    httpClientBuilder => httpClientBuilder.AddHttpMessageHandler<CorrelationIdHandler>()
+);
+builder.Services.AddHttpClient<IDoItClient, DoItClient>().ConfigurePrimaryHttpMessageHandler(NoRedirectHandler);
+builder.Services.AddHttpClient<IGamesDatabaseClient, GamesDatabaseClient>().ConfigurePrimaryHttpMessageHandler(NoRedirectHandler);
+builder.Services.AddHttpClient<IJellywatchClient, JellywatchClient>().ConfigurePrimaryHttpMessageHandler(NoRedirectHandler);
+builder.Services.AddHttpClient<IBeastVaultClient, BeastVaultClient>().ConfigurePrimaryHttpMessageHandler(NoRedirectHandler);
+builder.Services.AddHttpClient<IWarcraftArchiveClient, WarcraftArchiveClient>().ConfigurePrimaryHttpMessageHandler(NoRedirectHandler);
+builder.Services.AddSingleton<JellyfinImageGrants>();
+builder.Services.AddHttpClient<IJellyfinService, JellyfinService>().ConfigurePrimaryHttpMessageHandler(NoRedirectHandler);
+builder.Services.AddSingleton<GitHubActionsRuntimeCache>();
+builder.Services.AddHttpClient<IGitHubActionsMonitor, GitHubActionsMonitor>().ConfigurePrimaryHttpMessageHandler(NoRedirectHandler);
+builder.Services.AddHostedService<GitHubActionsPollingService>();
+builder.Services.AddSingleton<CasaOsUpdateLocks>();
+builder.Services.AddHttpClient<ICasaOsUpdateService, CasaOsUpdateService>()
+    .ConfigurePrimaryHttpMessageHandler(NoRedirectHandler);
+builder.Services.AddHttpClient("AppHealth", client => client.Timeout = TimeSpan.FromSeconds(5))
+    .ConfigurePrimaryHttpMessageHandler(NoRedirectHandler);
 builder.Services.AddSingleton<HouseholdProviderRegistry>();
 builder.Services.AddSingleton<HouseholdConnectionCoordinator>();
 builder.Services.AddScoped<HouseholdConsumerConnectionService>();
 builder.Services.AddScoped<IHouseholdProviderAccessService>(services =>
     services.GetRequiredService<HouseholdConsumerConnectionService>()
 );
-builder.Services.AddHttpClient("HouseholdProviders", client => client.Timeout = TimeSpan.FromSeconds(15));
+builder.Services.AddHttpClient("HouseholdProviders", client => client.Timeout = TimeSpan.FromSeconds(15))
+    .ConfigurePrimaryHttpMessageHandler(NoRedirectHandler);
 
-builder.Services.AddHttpContextAccessor();
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
@@ -383,14 +476,32 @@ if (adminCommandExitCode.HasValue)
 }
 
 // ── Middleware pipeline ────────────────────────────────────────────────────────
-app.UseSwagger();
-app.UseSwaggerUI(c =>
+if (app.Environment.IsDevelopment())
 {
-    c.SwaggerEndpoint("/swagger/v1/swagger.json", "Household API v1");
-    c.RoutePrefix = "swagger";
-});
+    app.UseSwagger();
+    app.UseSwaggerUI(c =>
+    {
+        c.SwaggerEndpoint("/swagger/v1/swagger.json", "Household API v1");
+        c.RoutePrefix = "swagger";
+    });
+}
 
+app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseMiddleware<ErrorHandlingMiddleware>();
+
+app.Use(
+    async (context, next) =>
+    {
+        context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+        context.Response.Headers["Referrer-Policy"] = "no-referrer";
+        context.Response.Headers["X-Frame-Options"] = "DENY";
+        context.Response.Headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()";
+        context.Response.Headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'";
+        await next(context);
+    }
+);
+
+if (!app.Environment.IsDevelopment()) app.UseHsts();
 
 app.Use(
     async (context, next) =>
@@ -412,6 +523,7 @@ else
     app.UseCors("AllowSpecificOrigins");
 
 app.UseAuthentication();
+app.UseMiddleware<PasswordChangeRequiredMiddleware>();
 app.UseRateLimiter();
 app.UseAuthorization();
 
@@ -465,6 +577,10 @@ app.MapJellywatchModuleEndpoints();
 app.MapPokemonModuleEndpoints();
 app.MapWarcraftModuleEndpoints();
 app.MapHouseholdConnectionEndpoints();
+app.MapSettingsEndpoints();
+app.MapJellyfinEndpoints();
+app.MapGitHubActionsEndpoints();
+app.MapCasaOsUpdateEndpoints();
 
 app.Run();
 
@@ -478,6 +594,8 @@ static async Task SeedAsync(AppDbContext db, SeedSettings settings, ILogger logg
     if (adminExists)
         return;
 
+    if (!AdminRecoveryCommand.PasswordMeetsRequirements(settings.AdminPassword))
+        throw new InvalidOperationException("Seed admin password does not meet the minimum password policy.");
     var passwordHash = BCrypt.Net.BCrypt.HashPassword(settings.AdminPassword, workFactor: 12);
 
     var admin = new User
@@ -515,3 +633,5 @@ static void ApplyEnvOverrideBool(IConfigurationRoot config, string key, string e
     if (!string.IsNullOrWhiteSpace(value))
         config[key] = value;
 }
+
+static HttpMessageHandler NoRedirectHandler() => new HttpClientHandler { AllowAutoRedirect = false };

@@ -8,20 +8,24 @@ namespace Household.Api.Infrastructure.Integrations.BeastVault;
 public sealed class BeastVaultClient : HouseholdProviderClientBase, IBeastVaultClient
 {
     private readonly HouseholdConnectionSettings _settings;
+    private readonly ExternalIntegrationSettings _externalSettings;
 
     public BeastVaultClient(
         HttpClient httpClient,
         IHouseholdProviderAccessService connectionAccess,
-        IOptions<HouseholdConnectionSettings> settings
+        IOptions<HouseholdConnectionSettings> settings,
+        IOptions<ExternalIntegrationSettings> externalSettings
     ) : base(httpClient, connectionAccess, "beast-vault", "Beast Vault")
     {
         _settings = settings.Value;
+        _externalSettings = externalSettings.Value;
     }
 
     public async Task<PokemonModuleListDto> GetPokemonAsync(
         Guid userId,
         string? search,
         IReadOnlyList<int> tagIds,
+        string spriteSource,
         int skip,
         int take,
         CancellationToken cancellationToken
@@ -53,7 +57,7 @@ public sealed class BeastVaultClient : HouseholdProviderClientBase, IBeastVaultC
                 item.IsEgg,
                 item.Type1,
                 item.Type2,
-                BuildPublicUrl(_settings.BeastVaultOpenUrl, item.SpriteUrl),
+                $"/modules/pokemon/sprites/{item.SpeciesId}?shiny={item.IsShiny.ToString().ToLowerInvariant()}&source={Uri.EscapeDataString(spriteSource)}",
                 BuildFallbackSpriteUrl(item.SpeciesId, item.IsShiny),
                 item.Tags.Select(tag => new PokemonTagDto(
                     tag.Id,
@@ -67,6 +71,59 @@ public sealed class BeastVaultClient : HouseholdProviderClientBase, IBeastVaultC
             Math.Max(skip, 0),
             Math.Clamp(take, 1, 100)
         );
+    }
+
+    public async Task<(byte[] Content, string ContentType)?> GetSpriteAsync(
+        Guid userId,
+        int speciesId,
+        bool shiny,
+        string source,
+        CancellationToken cancellationToken
+    )
+    {
+        if (speciesId <= 0) return null;
+        var path = source switch
+        {
+            "home" => $"/sprites/pokemon/home/{(shiny ? "shiny/" : string.Empty)}{speciesId}.png",
+            "artwork" => $"/sprites/pokemon/artwork/{(shiny ? "shiny/" : string.Empty)}{speciesId}.png",
+            "default" => $"/sprites/pokemon/{(shiny ? "shiny/" : string.Empty)}{speciesId}.png",
+            "showdown" => $"/sprites/pokemon/showdown/{(shiny ? "shiny/" : string.Empty)}{speciesId}.gif",
+            "github" => $"/sprites/pokemon/github/{(shiny ? "shiny/" : string.Empty)}{speciesId}.png",
+            _ => throw new ArgumentException("Unsupported Pokemon sprite source."),
+        };
+        var file = await DownloadAsync(userId, "pokemon.read", path, _externalSettings.ProviderAssetMaxBytes, cancellationToken);
+        return file is null || !IsAllowedImageContentType(file.ContentType)
+            ? null
+            : (file.Content, file.ContentType);
+    }
+
+    public async Task<(byte[] Content, string ContentType, string FileName)?> DownloadPokemonAsync(
+        Guid userId,
+        int id,
+        CancellationToken cancellationToken
+    )
+    {
+        if (id <= 0) return null;
+        var path = BuildConfiguredPath(_externalSettings.PokemonDownloadPathTemplate, id.ToString());
+        var file = await DownloadAsync(userId, "pokemon.download", path, _externalSettings.ProviderAssetMaxBytes, cancellationToken);
+        if (file is null) return null;
+        return (file.Content, "application/octet-stream", SanitizeFileName(file.FileName, id));
+    }
+
+    private static string SanitizeFileName(string? fileName, int id)
+    {
+        var candidate = string.IsNullOrWhiteSpace(fileName) ? $"pokemon-{id}.pk" : Path.GetFileName(fileName);
+        var safe = new string(candidate.Where(character => char.IsLetterOrDigit(character) || character is '.' or '-' or '_').ToArray());
+        return string.IsNullOrWhiteSpace(safe) ? $"pokemon-{id}.pk" : safe[..Math.Min(safe.Length, 120)];
+    }
+
+    private static string BuildConfiguredPath(string template, string id)
+    {
+        var path = template.Replace("{id}", id, StringComparison.Ordinal);
+        if (!path.StartsWith('/') || path.StartsWith("//", StringComparison.Ordinal)
+            || Uri.TryCreate(path, UriKind.Absolute, out _))
+            throw new ArgumentException("Pokemon download path template must be a relative provider path.");
+        return path;
     }
 
     public async Task<IReadOnlyList<PokemonTagFilterDto>> GetTagsAsync(
@@ -87,6 +144,12 @@ public sealed class BeastVaultClient : HouseholdProviderClientBase, IBeastVaultC
 
     private static string BuildFallbackSpriteUrl(int speciesId, bool isShiny) =>
         $"https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/home/{(isShiny ? "shiny/" : string.Empty)}{speciesId}.png";
+
+    private static bool IsAllowedImageContentType(string contentType) =>
+        contentType.Equals("image/jpeg", StringComparison.OrdinalIgnoreCase)
+        || contentType.Equals("image/png", StringComparison.OrdinalIgnoreCase)
+        || contentType.Equals("image/webp", StringComparison.OrdinalIgnoreCase)
+        || contentType.Equals("image/gif", StringComparison.OrdinalIgnoreCase);
 
     private sealed class SourceList
     {

@@ -30,10 +30,13 @@ public record WarcraftWeeklyItemDto(
     string ContentName,
     string Expansion,
     string Difficulty,
+    string Period,
     string Status,
     DateTime? LastCompletedAt,
     DateTime UpdatedAt
 );
+
+public record UpdateWarcraftTrackingStatusRequest(string Status);
 
 public record WarcraftWeeklyDto(
     DateTime GeneratedAtUtc,

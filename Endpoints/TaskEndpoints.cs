@@ -13,15 +13,21 @@ public static class TaskEndpoints
         var templates = app.MapGroup("/task-templates").WithTags("Home").RequireAuthorization();
 
         templates
-            .MapGet("/", async (ITaskService service) => Results.Ok(await service.GetAllTemplatesAsync()))
+            .MapGet("/", async (ITaskService service, HttpContext ctx) =>
+            {
+                var userId = ctx.GetUserId();
+                return userId is null ? Results.Unauthorized() : Results.Ok(await service.GetAllTemplatesAsync(userId.Value));
+            })
             .WithName("GetTaskTemplates");
 
         templates
             .MapGet(
                 "/{id:guid}",
-                async (Guid id, ITaskService service) =>
+                async (Guid id, ITaskService service, HttpContext ctx) =>
                 {
-                    var tt = await service.GetTemplateByIdAsync(id);
+                    var userId = ctx.GetUserId();
+                    if (userId is null) return Results.Unauthorized();
+                    var tt = await service.GetTemplateByIdAsync(id, userId.Value);
                     return tt == null ? Results.NotFound() : Results.Ok(tt);
                 }
             )
@@ -30,12 +36,14 @@ public static class TaskEndpoints
         templates
             .MapPost(
                 "/",
-                async (CreateTaskTemplateRequest request, ITaskService service) =>
+                async (CreateTaskTemplateRequest request, ITaskService service, HttpContext ctx) =>
                 {
                     if (string.IsNullOrWhiteSpace(request.Title))
                         return Results.BadRequest(new { message = "Title is required." });
 
-                    var tt = await service.CreateTemplateAsync(request);
+                    var userId = ctx.GetUserId();
+                    if (userId is null) return Results.Unauthorized();
+                    var tt = await service.CreateTemplateAsync(request, userId.Value);
                     return Results.Created($"/task-templates/{tt.Id}", tt);
                 }
             )
@@ -44,12 +52,14 @@ public static class TaskEndpoints
         templates
             .MapPut(
                 "/{id:guid}",
-                async (Guid id, UpdateTaskTemplateRequest request, ITaskService service) =>
+                async (Guid id, UpdateTaskTemplateRequest request, ITaskService service, HttpContext ctx) =>
                 {
                     if (string.IsNullOrWhiteSpace(request.Title))
                         return Results.BadRequest(new { message = "Title is required." });
 
-                    var tt = await service.UpdateTemplateAsync(id, request);
+                    var userId = ctx.GetUserId();
+                    if (userId is null) return Results.Unauthorized();
+                    var tt = await service.UpdateTemplateAsync(id, request, userId.Value);
                     return tt == null ? Results.NotFound() : Results.Ok(tt);
                 }
             )
@@ -58,9 +68,11 @@ public static class TaskEndpoints
         templates
             .MapDelete(
                 "/{id:guid}",
-                async (Guid id, ITaskService service) =>
+                async (Guid id, ITaskService service, HttpContext ctx) =>
                 {
-                    var deleted = await service.DeleteTemplateAsync(id);
+                    var userId = ctx.GetUserId();
+                    if (userId is null) return Results.Unauthorized();
+                    var deleted = await service.DeleteTemplateAsync(id, userId.Value);
                     return deleted ? Results.NoContent() : Results.NotFound();
                 }
             )
@@ -71,7 +83,11 @@ public static class TaskEndpoints
         var instances = app.MapGroup("/tasks").WithTags("Home").RequireAuthorization();
 
         instances
-            .MapGet("/today", async (ITaskService service) => Results.Ok(await service.GetTodayTasksAsync()))
+            .MapGet("/today", async (ITaskService service, HttpContext ctx) =>
+            {
+                var userId = ctx.GetUserId();
+                return userId is null ? Results.Unauthorized() : Results.Ok(await service.GetTodayTasksAsync(userId.Value));
+            })
             .WithName("GetTodayTasks")
             .WithSummary(
                 "Returns today's task instances (idempotently created) grouped by time slot, plus overdue ones."

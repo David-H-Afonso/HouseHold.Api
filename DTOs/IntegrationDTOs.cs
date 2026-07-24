@@ -6,7 +6,6 @@ public record IntegrationResponse(
     Guid Id,
     IntegrationType Type,
     string Name,
-    string? BaseUrl,
     string? OpenUrl,
     bool Enabled,
     IntegrationHealthStatus LastHealthStatus,

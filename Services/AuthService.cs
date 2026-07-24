@@ -7,6 +7,7 @@ using Household.Api.Configuration;
 using Household.Api.Data;
 using Household.Api.DTOs;
 using Household.Api.Models.Auth;
+using Household.Api.Operations;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
@@ -15,6 +16,8 @@ namespace Household.Api.Services;
 
 public class AuthService : IAuthService
 {
+    private static readonly SemaphoreSlim SessionGate = new(1, 1);
+    private static readonly string DummyPasswordHash = BCrypt.Net.BCrypt.HashPassword("Household!TimingOnly9", workFactor: 12);
     private readonly AppDbContext _context;
     private readonly JwtSettings _jwtSettings;
     private readonly ILogger<AuthService> _logger;
@@ -30,81 +33,105 @@ public class AuthService : IAuthService
 
     public async Task<LoginResponse?> LoginAsync(string email, string password, string? userAgent, string? deviceName)
     {
-        var user = await _context.Users.FirstOrDefaultAsync(u => u.Email.ToLower() == email.ToLower() && u.IsActive);
-
-        if (user == null || !VerifyPassword(password, user.PasswordHash))
+        if (string.IsNullOrWhiteSpace(email) || string.IsNullOrEmpty(password) || email.Length > 320 || password.Length > 1024)
             return null;
+        await SessionGate.WaitAsync();
+        try
+        {
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.Email.ToLower() == email.ToLower() && u.IsActive);
 
-        var (accessToken, accessExpires) = GenerateAccessToken(user);
-        var (rawRefresh, refreshToken) = await CreateRefreshTokenAsync(user.Id, userAgent, deviceName);
+            var passwordMatches = VerifyPassword(password, user?.PasswordHash ?? DummyPasswordHash);
+            if (user == null || !passwordMatches)
+                return null;
 
-        return new LoginResponse(
-            UserId: user.Id,
-            Email: user.Email,
-            UserName: user.UserName,
-            IsAdmin: user.IsAdmin,
-            AccessToken: accessToken,
-            RefreshToken: rawRefresh,
-            AccessTokenExpiresAt: accessExpires
-        );
+            var (accessToken, accessExpires) = GenerateAccessToken(user);
+            var (rawRefresh, refreshToken) = await CreateRefreshTokenAsync(user.Id, userAgent, deviceName);
+
+            return new LoginResponse(
+                UserId: user.Id,
+                Email: user.Email,
+                UserName: user.UserName,
+                IsAdmin: user.IsAdmin,
+                RequiresPasswordChange: user.RequiresPasswordChange,
+                AccessToken: accessToken,
+                RefreshToken: rawRefresh,
+                AccessTokenExpiresAt: accessExpires
+            );
+        }
+        finally
+        {
+            SessionGate.Release();
+        }
     }
 
     // ── Refresh ───────────────────────────────────────────────────────────────
 
     public async Task<RefreshResponse?> RefreshAsync(string rawRefreshToken, string? userAgent, string? deviceName)
     {
-        var tokenHash = HashToken(rawRefreshToken);
-
-        var existing = await _context
-            .RefreshTokens.Include(rt => rt.User)
-            .FirstOrDefaultAsync(rt => rt.TokenHash == tokenHash);
-
-        if (existing == null)
+        if (string.IsNullOrWhiteSpace(rawRefreshToken) || rawRefreshToken.Length > 1024)
             return null;
+        await SessionGate.WaitAsync();
+        try
+        {
+            var tokenHash = HashToken(rawRefreshToken);
+
+            var existing = await _context
+                .RefreshTokens.Include(rt => rt.User)
+                .FirstOrDefaultAsync(rt => rt.TokenHash == tokenHash);
+
+            if (existing == null)
+                return null;
 
         // Refresh token reuse detection: if token is already revoked → possible theft
-        if (!existing.IsActive)
-        {
-            _logger.LogWarning(
-                "Refresh token reuse detected for user {UserId}. Revoking all active tokens.",
-                existing.UserId
-            );
-            var allActive = await _context
-                .RefreshTokens.Where(rt => rt.UserId == existing.UserId && rt.RevokedAt == null)
-                .ToListAsync();
-            foreach (var t in allActive)
-                t.RevokedAt = DateTime.UtcNow;
-            await _context.SaveChangesAsync();
-            return null;
-        }
+            if (!existing.IsActive)
+            {
+                _logger.LogWarning(
+                    "Refresh token reuse detected for user {UserId}. Revoking all active tokens.",
+                    existing.UserId
+                );
+                var allActive = await _context
+                    .RefreshTokens.Where(rt => rt.UserId == existing.UserId && rt.RevokedAt == null)
+                    .ToListAsync();
+                foreach (var t in allActive)
+                    t.RevokedAt = DateTime.UtcNow;
+                await _context.SaveChangesAsync();
+                return null;
+            }
 
-        if (!existing.User.IsActive)
-            return null;
+            if (!existing.User.IsActive || existing.User.RequiresPasswordChange)
+                return null;
 
         // Revoke old token
-        existing.RevokedAt = DateTime.UtcNow;
+            existing.RevokedAt = DateTime.UtcNow;
 
         // Issue new refresh token
-        var (newRawRefresh, newRefreshToken) = await CreateRefreshTokenAsync(existing.UserId, userAgent, deviceName);
+            var (newRawRefresh, newRefreshToken) = await CreateRefreshTokenAsync(existing.UserId, userAgent, deviceName);
 
         // Link for audit trail
-        existing.ReplacedByTokenId = newRefreshToken.Id;
+            existing.ReplacedByTokenId = newRefreshToken.Id;
 
-        await _context.SaveChangesAsync();
+            await _context.SaveChangesAsync();
 
-        var (accessToken, accessExpires) = GenerateAccessToken(existing.User);
+            var (accessToken, accessExpires) = GenerateAccessToken(existing.User);
 
-        return new RefreshResponse(
-            AccessToken: accessToken,
-            RefreshToken: newRawRefresh,
-            AccessTokenExpiresAt: accessExpires
-        );
+            return new RefreshResponse(
+                AccessToken: accessToken,
+                RefreshToken: newRawRefresh,
+                AccessTokenExpiresAt: accessExpires
+            );
+        }
+        finally
+        {
+            SessionGate.Release();
+        }
     }
 
     // ── Logout ────────────────────────────────────────────────────────────────
 
     public async Task<bool> LogoutAsync(string rawRefreshToken)
     {
+        if (string.IsNullOrWhiteSpace(rawRefreshToken) || rawRefreshToken.Length > 1024)
+            return false;
         var tokenHash = HashToken(rawRefreshToken);
         var token = await _context.RefreshTokens.FirstOrDefaultAsync(rt => rt.TokenHash == tokenHash);
 
@@ -125,8 +152,63 @@ public class AuthService : IAuthService
             .ToListAsync();
         foreach (var t in tokens)
             t.RevokedAt = DateTime.UtcNow;
+        var user = await _context.Users.SingleOrDefaultAsync(item => item.Id == userId);
+        if (user is not null)
+            user.SessionVersion++;
         await _context.SaveChangesAsync();
         return tokens.Count;
+    }
+
+    public async Task<string?> ChangePasswordAsync(
+        Guid userId,
+        string currentPassword,
+        string newPassword,
+        CancellationToken cancellationToken
+    )
+    {
+        if (string.IsNullOrEmpty(currentPassword) || currentPassword.Length > 1024)
+            return "invalid_current_password";
+        if (
+            string.IsNullOrEmpty(newPassword)
+            || newPassword.Length > 128
+            || !AdminRecoveryCommand.PasswordMeetsRequirements(newPassword)
+        )
+            return "password_too_weak";
+
+        await SessionGate.WaitAsync(cancellationToken);
+        try
+        {
+            var user = await _context.Users.SingleOrDefaultAsync(item => item.Id == userId, cancellationToken);
+            var passwordMatches = VerifyPassword(currentPassword, user?.PasswordHash ?? DummyPasswordHash);
+            if (user == null || !passwordMatches)
+                return "invalid_current_password";
+
+            user.PasswordHash = HashPassword(newPassword);
+            user.RequiresPasswordChange = false;
+            user.SessionVersion++;
+
+            var sessions = await _context
+                .RefreshTokens.Where(token => token.UserId == userId && token.RevokedAt == null)
+                .ToListAsync(cancellationToken);
+            var now = DateTime.UtcNow;
+            foreach (var session in sessions)
+                session.RevokedAt = now;
+
+            _context.AuditEvents.Add(
+                new AuditEvent
+                {
+                    ActorUserId = userId,
+                    TargetUserId = userId,
+                    Action = "user.password_changed",
+                }
+            );
+            await _context.SaveChangesAsync(cancellationToken);
+            return null;
+        }
+        finally
+        {
+            SessionGate.Release();
+        }
     }
 
     // ── Create User ───────────────────────────────────────────────────────────
@@ -143,6 +225,7 @@ public class AuthService : IAuthService
             PasswordHash = HashPassword(password),
             IsAdmin = isAdmin,
             IsActive = true,
+            RequiresPasswordChange = false,
         };
 
         _context.Users.Add(user);
@@ -167,6 +250,8 @@ public class AuthService : IAuthService
             new(ClaimTypes.NameIdentifier, user.Id.ToString()),
             new(ClaimTypes.Email, user.Email),
             new(ClaimTypes.Name, user.UserName),
+            new(HouseholdClaimTypes.SessionVersion, user.SessionVersion.ToString()),
+            new(HouseholdClaimTypes.RequiresPasswordChange, user.RequiresPasswordChange.ToString().ToLowerInvariant()),
         };
         if (user.IsAdmin)
             claims.Add(new Claim(ClaimTypes.Role, "Admin"));
@@ -201,8 +286,8 @@ public class AuthService : IAuthService
             UserId = userId,
             TokenHash = tokenHash,
             ExpiresAt = DateTime.UtcNow.AddDays(_jwtSettings.RefreshTokenDays),
-            UserAgent = userAgent,
-            DeviceName = deviceName,
+            UserAgent = NormalizeMetadata(userAgent, 512),
+            DeviceName = NormalizeMetadata(deviceName, 200),
         };
 
         _context.RefreshTokens.Add(entity);
@@ -215,5 +300,12 @@ public class AuthService : IAuthService
     {
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(rawToken));
         return Convert.ToHexString(bytes).ToLowerInvariant();
+    }
+
+    private static string? NormalizeMetadata(string? value, int maxLength)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var normalized = new string(value.Where(character => !char.IsControl(character)).ToArray()).Trim();
+        return normalized[..Math.Min(normalized.Length, maxLength)];
     }
 }

@@ -20,7 +20,7 @@ public class IntegrationHealthService : IIntegrationHealthService
     public async Task<IntegrationHealthDto> GetHealthAsync(Guid integrationId, CancellationToken cancellationToken)
     {
         var integration = await _db.Integrations.FindAsync([integrationId], cancellationToken);
-        if (integration is null)
+        if (integration is null || integration.Type == IntegrationType.CasaOS)
             throw new KeyNotFoundException("Integration not found.");
 
         var health = await ResolveHealthAsync(integration, cancellationToken);
@@ -32,7 +32,11 @@ public class IntegrationHealthService : IIntegrationHealthService
 
     public async Task<IReadOnlyList<IntegrationHealthDto>> GetAllHealthAsync(CancellationToken cancellationToken)
     {
-        var integrations = await _db.Integrations.OrderBy(i => i.Type).ThenBy(i => i.Name).ToListAsync(cancellationToken);
+        var integrations = await _db.Integrations
+            .Where(i => i.Type != IntegrationType.CasaOS)
+            .OrderBy(i => i.Type)
+            .ThenBy(i => i.Name)
+            .ToListAsync(cancellationToken);
         var results = new List<IntegrationHealthDto>();
 
         foreach (var integration in integrations)
@@ -89,14 +93,14 @@ public class IntegrationHealthService : IIntegrationHealthService
         {
             return await client.GetHealthAsync(cancellationToken);
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             return new IntegrationHealthDto(
                 integration.Id,
                 integration.Type,
                 integration.Name,
                 IntegrationHealthStatus.Degraded,
-                $"Health check failed: {ex.Message}",
+                "Health check failed.",
                 DateTime.UtcNow
             );
         }

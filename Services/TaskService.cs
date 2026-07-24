@@ -16,32 +16,35 @@ public class TaskService : ITaskService
 
     // ── TaskTemplate CRUD ─────────────────────────────────────────────────────
 
-    public async Task<List<TaskTemplateDto>> GetAllTemplatesAsync()
+    public async Task<List<TaskTemplateDto>> GetAllTemplatesAsync(Guid userId)
     {
         var templates = await _context
             .TaskTemplates.Include(tt => tt.Room)
             .Include(tt => tt.AssignedToUser)
+            .Where(tt => tt.OwnerUserId == userId)
             .OrderBy(tt => tt.Title)
             .ToListAsync();
 
         return templates.Select(ToTemplateDto).ToList();
     }
 
-    public async Task<TaskTemplateDto?> GetTemplateByIdAsync(Guid id)
+    public async Task<TaskTemplateDto?> GetTemplateByIdAsync(Guid id, Guid userId)
     {
         var tt = await _context
             .TaskTemplates.Include(t => t.Room)
             .Include(t => t.AssignedToUser)
-            .FirstOrDefaultAsync(t => t.Id == id);
+            .FirstOrDefaultAsync(t => t.Id == id && t.OwnerUserId == userId);
 
         return tt == null ? null : ToTemplateDto(tt);
     }
 
-    public async Task<TaskTemplateDto> CreateTemplateAsync(CreateTaskTemplateRequest request)
+    public async Task<TaskTemplateDto> CreateTemplateAsync(CreateTaskTemplateRequest request, Guid userId)
     {
+        await ValidateAssignedUserAsync(request.AssignedToUserId);
         var tt = new TaskTemplate
         {
             Title = request.Title.Trim(),
+            OwnerUserId = userId,
             RoomId = request.RoomId,
             Description = request.Description,
             AssignedToUserId = request.AssignedToUserId,
@@ -57,14 +60,15 @@ public class TaskService : ITaskService
 
         _context.TaskTemplates.Add(tt);
         await _context.SaveChangesAsync();
-        return (await GetTemplateByIdAsync(tt.Id))!;
+        return (await GetTemplateByIdAsync(tt.Id, userId))!;
     }
 
-    public async Task<TaskTemplateDto?> UpdateTemplateAsync(Guid id, UpdateTaskTemplateRequest request)
+    public async Task<TaskTemplateDto?> UpdateTemplateAsync(Guid id, UpdateTaskTemplateRequest request, Guid userId)
     {
-        var tt = await _context.TaskTemplates.FindAsync(id);
+        var tt = await _context.TaskTemplates.FirstOrDefaultAsync(item => item.Id == id && item.OwnerUserId == userId);
         if (tt == null)
             return null;
+        await ValidateAssignedUserAsync(request.AssignedToUserId);
 
         tt.Title = request.Title.Trim();
         tt.RoomId = request.RoomId;
@@ -80,12 +84,12 @@ public class TaskService : ITaskService
         tt.IsActive = request.IsActive;
 
         await _context.SaveChangesAsync();
-        return await GetTemplateByIdAsync(id);
+        return await GetTemplateByIdAsync(id, userId);
     }
 
-    public async Task<bool> DeleteTemplateAsync(Guid id)
+    public async Task<bool> DeleteTemplateAsync(Guid id, Guid userId)
     {
-        var tt = await _context.TaskTemplates.FindAsync(id);
+        var tt = await _context.TaskTemplates.FirstOrDefaultAsync(item => item.Id == id && item.OwnerUserId == userId);
         if (tt == null)
             return false;
 
@@ -96,7 +100,7 @@ public class TaskService : ITaskService
 
     // ── Today's tasks ─────────────────────────────────────────────────────────
 
-    public async Task<TodayTasksResponse> GetTodayTasksAsync()
+    public async Task<TodayTasksResponse> GetTodayTasksAsync(Guid userId)
     {
         // Respect TZ env var (Linux/Docker). Falls back to local time if unset or unknown.
         var tzId = Environment.GetEnvironmentVariable("TZ");
@@ -115,6 +119,7 @@ public class TaskService : ITaskService
             .TaskTemplates.Include(tt => tt.Room)
             .Include(tt => tt.AssignedToUser)
             .Where(tt => tt.IsActive)
+            .Where(tt => tt.OwnerUserId == userId)
             .ToListAsync();
 
         var todayTemplateIds = templates.Where(tt => AppliesToDate(tt, today)).Select(tt => tt.Id).ToHashSet();
@@ -189,7 +194,7 @@ public class TaskService : ITaskService
             .TaskInstances.Include(ti => ti.TaskTemplate)
                 .ThenInclude(tt => tt.Room)
             .Include(ti => ti.AssignedToUser)
-            .FirstOrDefaultAsync(ti => ti.Id == instanceId);
+            .FirstOrDefaultAsync(ti => ti.Id == instanceId && ti.TaskTemplate.OwnerUserId == completedByUserId);
 
         if (instance == null)
             return null;
@@ -205,6 +210,13 @@ public class TaskService : ITaskService
     }
 
     // ── Schedule logic ────────────────────────────────────────────────────────
+
+    private async Task ValidateAssignedUserAsync(Guid? assignedToUserId)
+    {
+        if (assignedToUserId is null) return;
+        if (!await _context.Users.AnyAsync(user => user.Id == assignedToUserId && user.IsActive))
+            throw new ArgumentException("Assigned user is not available.");
+    }
 
     private static bool AppliesToDate(TaskTemplate tt, DateOnly date)
     {

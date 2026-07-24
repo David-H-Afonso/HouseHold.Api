@@ -4,6 +4,7 @@ public class TaskTemplate
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid? RoomId { get; set; }
+    public Guid? OwnerUserId { get; set; }
     public string Title { get; set; } = string.Empty;
     public string? Description { get; set; }
     public Guid? AssignedToUserId { get; set; }
@@ -28,5 +29,6 @@ public class TaskTemplate
     // Navigation
     public Room? Room { get; set; }
     public Auth.User? AssignedToUser { get; set; }
+    public Auth.User? OwnerUser { get; set; }
     public ICollection<TaskInstance> Instances { get; set; } = [];
 }

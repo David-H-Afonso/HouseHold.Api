@@ -10,6 +10,8 @@ public class User
     public string PasswordHash { get; set; } = string.Empty;
     public bool IsAdmin { get; set; } = false;
     public bool IsActive { get; set; } = true;
+    public bool RequiresPasswordChange { get; set; }
+    public int SessionVersion { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 
@@ -17,4 +19,6 @@ public class User
     public ICollection<RefreshToken> RefreshTokens { get; set; } = [];
     public ICollection<HouseholdConsumerConnection> HouseholdConsumerConnections { get; set; } = [];
     public ICollection<HouseholdAuthorizationAttempt> HouseholdAuthorizationAttempts { get; set; } = [];
+    public UserPreference? Preference { get; set; }
+    public ICollection<UserAppFavorite> AppFavorites { get; set; } = [];
 }

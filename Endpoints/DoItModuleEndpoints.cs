@@ -12,43 +12,93 @@ public static class DoItModuleEndpoints
 
         group.MapGet(
                 "/",
-                async (string? date, HttpContext context, IDoItClient client, CancellationToken ct) =>
+                async (
+                    string? date,
+                    HttpContext context,
+                    IDoItClient client,
+                    IUserSettingsService settings,
+                    CancellationToken ct) =>
                 {
                     var userId = context.GetUserId();
                     if (userId is null)
                         return Results.Unauthorized();
-                    if (
-                        date is not null
-                        && !DateOnly.TryParseExact(date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _)
-                    )
+                    if (!TryParseDate(date, out var requestedDate))
                         return Results.BadRequest(new { message = "date_must_use_yyyy_mm_dd" });
 
-                    return Results.Ok(await client.GetNowAsync(userId.Value, date, ct));
+                    var preferences = await settings.GetPreferencesAsync(userId.Value, ct);
+                    var timeZoneId = preferences.TimeZoneId ?? "UTC";
+                    var explicitDate = requestedDate ?? GetLocalDate(timeZoneId);
+                    return Results.Ok(await client.GetNowAsync(
+                        userId.Value,
+                        explicitDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                        timeZoneId,
+                        ct));
                 }
             );
 
         group.MapPost("/occurrences/{occurrenceId:guid}/complete", async (
             Guid occurrenceId,
+            string? date,
             HttpContext context,
             IDoItClient client,
+            IUserSettingsService settings,
             CancellationToken ct) =>
         {
             var userId = context.GetUserId();
-            return userId is null
-                ? Results.Unauthorized()
-                : Results.Ok(await client.CompleteOccurrenceAsync(userId.Value, occurrenceId, ct));
-        });
+            if (userId is null) return Results.Unauthorized();
+            if (!TryParseDate(date, out var requestedDate))
+                return Results.BadRequest(new { message = "date_must_use_yyyy_mm_dd" });
+            var preferences = await settings.GetPreferencesAsync(userId.Value, ct);
+            var timeZoneId = preferences.TimeZoneId ?? "UTC";
+            return Results.Ok(await client.CompleteOccurrenceAsync(
+                userId.Value,
+                occurrenceId,
+                requestedDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                timeZoneId,
+                ct));
+        }).RequireRateLimiting("mutation");
 
         group.MapPost("/occurrences/{occurrenceId:guid}/undo", async (
             Guid occurrenceId,
+            string? date,
             HttpContext context,
             IDoItClient client,
+            IUserSettingsService settings,
             CancellationToken ct) =>
         {
             var userId = context.GetUserId();
-            return userId is null
-                ? Results.Unauthorized()
-                : Results.Ok(await client.UndoOccurrenceAsync(userId.Value, occurrenceId, ct));
-        });
+            if (userId is null) return Results.Unauthorized();
+            if (!TryParseDate(date, out var requestedDate))
+                return Results.BadRequest(new { message = "date_must_use_yyyy_mm_dd" });
+            var preferences = await settings.GetPreferencesAsync(userId.Value, ct);
+            var timeZoneId = preferences.TimeZoneId ?? "UTC";
+            return Results.Ok(await client.UndoOccurrenceAsync(
+                userId.Value,
+                occurrenceId,
+                requestedDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                timeZoneId,
+                ct));
+        }).RequireRateLimiting("mutation");
     }
+
+    private static bool TryParseDate(string? value, out DateOnly? date)
+    {
+        if (value is null)
+        {
+            date = null;
+            return true;
+        }
+
+        if (DateOnly.TryParseExact(value, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed))
+        {
+            date = parsed;
+            return true;
+        }
+
+        date = null;
+        return false;
+    }
+
+    private static DateOnly GetLocalDate(string timeZoneId) => DateOnly.FromDateTime(
+        TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, TimeZoneInfo.FindSystemTimeZoneById(timeZoneId)));
 }

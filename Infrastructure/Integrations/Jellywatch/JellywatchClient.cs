@@ -18,12 +18,12 @@ public sealed class JellywatchClient : HouseholdProviderClientBase, IJellywatchC
         _settings = settings.Value;
     }
 
-    public async Task<JellywatchDashboardDto> GetDashboardAsync(Guid userId, CancellationToken cancellationToken)
+    public async Task<JellywatchDashboardDto> GetDashboardAsync(Guid userId, string timeZoneId, CancellationToken cancellationToken)
     {
         var source = await GetRequiredAsync<SourceDashboard>(
             userId,
             "activity.read",
-            "/api/integrations/household/v1/dashboard?activityLimit=3&upcomingDays=30",
+            $"/api/integrations/household/v1/dashboard?activityLimit=20&upcomingDays=8&timeZoneId={Uri.EscapeDataString(timeZoneId)}",
             cancellationToken
         );
 
@@ -44,12 +44,12 @@ public sealed class JellywatchClient : HouseholdProviderClientBase, IJellywatchC
                 item.EpisodeNumber,
                 item.EventType,
                 item.Timestamp,
-                BuildPublicUrl(_settings.JellywatchOpenUrl, item.PosterUrl ?? $"/api/asset/{item.MediaItemId}/poster"),
+                $"/modules/media/jellywatch/posters/{item.MediaItemId}?source=activity",
                 item.UserRating,
                 item.TmdbRating,
                 BuildPublicUrl(_settings.JellywatchOpenUrl, "/#/activity")
             )).ToList(),
-            source.Upcoming.Select(item => new JellywatchUpcomingDto(
+            FilterUpcoming(source.Upcoming, timeZoneId).Select(item => new JellywatchUpcomingDto(
                 item.MediaItemId,
                 item.SeriesId,
                 item.SeriesTitle,
@@ -60,10 +60,40 @@ public sealed class JellywatchClient : HouseholdProviderClientBase, IJellywatchC
                 item.AirTime,
                 item.AirTimeUtc,
                 item.BatchCount,
-                BuildPublicUrl(_settings.JellywatchOpenUrl, item.PosterUrl ?? $"/api/asset/{item.MediaItemId}/poster"),
+                $"/modules/media/jellywatch/posters/{item.MediaItemId}?source=upcoming",
                 BuildPublicUrl(_settings.JellywatchOpenUrl, $"/#/series/{item.SeriesId}")
             )).ToList()
         );
+    }
+
+    public async Task<(byte[] Content, string ContentType)?> GetPosterAsync(
+        Guid userId,
+        long mediaItemId,
+        string requiredScope,
+        CancellationToken cancellationToken
+    )
+    {
+        if (mediaItemId <= 0) return null;
+        var file = await DownloadAsync(userId, requiredScope, $"/api/asset/{mediaItemId}/poster", 8 * 1024 * 1024, cancellationToken);
+        return file is null || !IsAllowedImageContentType(file.ContentType)
+            ? null
+            : (file.Content, file.ContentType);
+    }
+
+    private static bool IsAllowedImageContentType(string contentType) =>
+        contentType.Equals("image/jpeg", StringComparison.OrdinalIgnoreCase)
+        || contentType.Equals("image/png", StringComparison.OrdinalIgnoreCase)
+        || contentType.Equals("image/webp", StringComparison.OrdinalIgnoreCase)
+        || contentType.Equals("image/gif", StringComparison.OrdinalIgnoreCase);
+
+    private static IReadOnlyList<SourceUpcoming> FilterUpcoming(IReadOnlyList<SourceUpcoming> items, string timeZoneId)
+    {
+        TimeZoneInfo zone;
+        try { zone = TimeZoneInfo.FindSystemTimeZoneById(timeZoneId); }
+        catch { zone = TimeZoneInfo.Utc; }
+        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, zone));
+        var end = today.AddDays(7);
+        return items.Where(item => DateOnly.TryParse(item.AirDate, out var date) && date >= today && date < end).ToList();
     }
 
     private sealed class SourceDashboard

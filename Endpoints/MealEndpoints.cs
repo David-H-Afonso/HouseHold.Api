@@ -26,9 +26,11 @@ public static class MealEndpoints
         group
             .MapGet(
                 "/{id:guid}",
-                async (Guid id, IMealService service) =>
+                async (Guid id, IMealService service, HttpContext ctx) =>
                 {
-                    var entry = await service.GetByIdAsync(id);
+                    var userId = ctx.GetUserId();
+                    if (userId is null) return Results.Unauthorized();
+                    var entry = await service.GetByIdAsync(id, userId.Value);
                     return entry == null ? Results.NotFound() : Results.Ok(entry);
                 }
             )

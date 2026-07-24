@@ -14,6 +14,10 @@ RESTful API for Household — a personal home management app covering food track
 - **Admin Panel** — User management for self-hosted instances
 - **JWT Authentication** — Access + refresh token flow with BCrypt password hashing
 - **Seed Support** — Optional admin user seeding on first run
+- **Per-user settings** — Versioned preferences, dashboard layout, provider filters, and app favorites
+- **Admin invitations** — Expiring one-use invites and auditable session-aware user management
+- **Jellyfin/GitHub Actions** — Encrypted server configuration, safe proxies, and a 12-repository workflow cache
+- **CasaOS updates** — Admin-only, allowlisted Compose update/rollback with private persistent backups
 
 ## Tech Stack
 
@@ -63,6 +67,23 @@ See the root `docker-compose.casaos.yml` for CasaOS deployment.
 | POST   | `/auth/login`    | Login                |
 | POST   | `/auth/refresh`  | Refresh JWT token    |
 | POST   | `/auth/logout`   | Revoke refresh token |
+| POST   | `/auth/change-password` | Change the authenticated user's password and revoke all sessions |
+| POST   | `/invitations/redeem` | Redeem a one-use invitation |
+
+`POST /auth/change-password` requires a bearer token and accepts `currentPassword` (1-1024 characters) and
+`newPassword` (12-128 characters, with uppercase, lowercase, number, and symbol). A successful response is
+`200 { "code": "password_changed", "reauthenticationRequired": true }`; the access token used for the request and
+all refresh sessions are invalid after that response. Invalid current passwords and weak new passwords return safe
+`400` error codes without password data.
+
+Users created directly by an administrator, including users created with an administrator-supplied temporary
+password, and users whose password is reset must change that password before using the application. Login and
+`GET /auth/me` expose `requiresPasswordChange`; access JWTs carry the same `requiresPasswordChange` claim.
+While the flag is set, the API permits only `/auth/me`, `/auth/change-password`, `/auth/logout`, `/auth/logout-all`,
+and anonymous `/health`; refresh-token rotation is refused and other authenticated requests return
+`403 { "code": "password_change_required" }`. Invitation redemption
+uses the user's chosen password and does not set the flag. A successful self-service password change clears it and
+invalidates all existing access and refresh sessions.
 
 ### Food Items
 
@@ -139,9 +160,47 @@ See the root `docker-compose.casaos.yml` for CasaOS deployment.
 | Method | Route               | Description    |
 | ------ | ------------------- | -------------- |
 | GET    | `/admin/users`      | List all users |
-| POST   | `/admin/users`      | Create a user  |
-| PUT    | `/admin/users/{id}` | Update a user  |
-| DELETE | `/admin/users/{id}` | Delete a user  |
+| POST   | `/admin/users`      | Create a user with a temporary password that must be changed |
+| PATCH  | `/admin/users/{id}` | Edit role/name/email/active state |
+| POST   | `/admin/users/{id}/reset-password` | Issue a secure temporary password that must be changed |
+| POST   | `/admin/invitations` | Create an expiring invitation |
+
+### Settings And Monitors
+
+| Method | Route | Description |
+| --- | --- | --- |
+| GET/PATCH | `/api/v1/preferences` | Current user's versioned preferences |
+| GET/PATCH | `/api/v1/dashboard/layout` | Independent widget layout |
+| GET | `/api/v1/dashboard/catalog` | Stable widget catalog |
+| POST | `/api/v1/dashboard/layout/reset` | Restore default layout |
+| GET | `/api/v1/jellyfin/dashboard` | Continue Watching and Next Up |
+| GET | `/api/v1/github-actions` | Cached allowlisted workflow status |
+
+Jellyfin item links are browser-session deep links. Depending on the Jellyfin deployment and current browser login,
+opening one may show Jellyfin's sign-in page rather than the item; Household never places the Jellyfin API key in
+the link or browser session.
+
+### CasaOS Update Operations (Admin Only)
+
+Household can replicate CasaOS **Edit -> Update** for exactly `household`, `doit`, `gamesdatabase`, `jellywatch`, `beastvault`, `warcraftarchive`, and `jellyfin`. Configure the bridged/LAN CasaOS base URL and raw CasaOS JWT through `PUT /api/v1/admin/casaos/config`; both are server-only and the response exposes only `configured` and `hasToken`.
+
+| Method | Route | Body / result |
+| --- | --- | --- |
+| GET/PUT | `/api/v1/admin/casaos/config` | Write-only internal base URL/raw token configuration. |
+| POST | `/api/v1/admin/casaos/apps/{appId}/update` | `{ "confirmation": "UPDATE <appId>" }`; returns HTTP 202 queued/accepted metadata. |
+| POST | `/api/v1/admin/casaos/apps/{appId}/rollback` | `{ "confirmation": "ROLLBACK <appId>", "backupId": null }`; null selects the latest server-generated backup. |
+| GET | `/api/v1/admin/casaos/apps/{appId}/actions` | Latest 50 update/rollback audit records. |
+| GET | `/api/v1/admin/casaos/apps/{appId}/actions/{actionLogId}` | One accepted/failed record; it is not live CasaOS completion status. |
+
+CasaOS returns before the asynchronous pull/apply completes. Household therefore never reports a 200 from CasaOS as completed or succeeded. Rollback applies stored interpolated YAML unchanged, but it cannot restore images removed from a registry, application data, volumes, or external dependencies; verify containers and application health in CasaOS afterward.
+
+Successful update/rollback response shape is `{ actionLogId, appId, action, status: "Queued", message, startedAt, backupId, safetyBackupId }`. History/status replaces `backupId` fields with nullable values as appropriate and also returns `finishedAt`, `previousImages`, and a safe `errorCode`; it never returns YAML or filesystem paths.
+
+`GET /modules/apps/` and `GET /modules/apps/{id}` now include nullable `updateAvailable` (`null` means unknown) and `adminActionsAvailable` (true only for an authenticated admin, a configured CasaOS connection, and an allowlisted app).
+
+Provider quick actions and assets remain under `/modules`: Games status reconciliation, timezone-aware DoIt, exact seven-day Jellywatch plus poster proxy, Pokemon sprite/download proxy, and Warcraft tracking status.
+
+`GET /modules/today?date=YYYY-MM-DD` always forwards an explicit date and the authenticated user's stored preference `timeZoneId` to DoIt. If `date` is omitted, Household derives it in that stored timezone (or UTC until a timezone is stored). Complete and undo accept the same optional `date` query; when omitted they recover the exact date/timezone from the recently loaded occurrence, and fail safely if that context is unavailable. Mutation requests and ambiguous-timeout reconciliation use that same explicit date/timezone. Today task DTOs preserve `recurrenceType`, `assignmentMode`, `assigneeNames`, `timeZoneId`, and nullable UTC `completedAt`.
 
 ## Project Structure
 
@@ -185,6 +244,20 @@ Household.Api/
 | `SEED_ADMIN_EMAIL`         | Admin user email                | `admin@local`        |
 | `SEED_ADMIN_USERNAME`      | Admin username                  | `admin`              |
 | `SEED_ADMIN_PASSWORD`      | Admin password                  | _(set in .env)_      |
+| `GITHUB_ACTIONS_POLL_SECONDS` | Workflow polling interval (45-90 seconds) | `60` |
+| `GITHUB_ACTIONS_CONCURRENCY` | Bounded workflow poll concurrency | `4` |
+| `WARCRAFT_STATUS_PATH_TEMPLATE` | Provider tracking-status route override | documented default |
+| `POKEMON_DOWNLOAD_PATH_TEMPLATE` | Provider Pokemon-download route override | documented default |
+| `CASAOS_COMPOSE_BACKUP_ROOT` | Private persistent compose backup root | `/data/compose-backups` |
+| `CASAOS_UPDATE_TIMEOUT_SECONDS` | CasaOS request timeout (clamped 5-30s) | `15` |
+| `CASAOS_MAX_YAML_BYTES` | Maximum fetched/stored compose YAML | `2097152` |
+| `CASAOS_MAX_JSON_BYTES` | Maximum upgradable-app JSON | `262144` |
+
+Jellyfin URLs/API key and the GitHub read-only fine-grained PAT are admin-set, write-only, purpose-protected database values. Household stores no Jellyfin passwords.
+
+CasaOS internal base URL and raw JWT are likewise admin-set and purpose-protected. Use a LAN/host address reachable from the bridged Household container, not `localhost`/`127.0.0.1`; persist `/data/compose-backups` and keep it readable only by the API container identity. No Docker socket or CasaOS app directory mount is required.
+
+The API reads local `.env` values only when the same process environment variable is not already set, so Docker/CasaOS configuration keeps precedence.
 
 ## License
 

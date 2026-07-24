@@ -35,14 +35,15 @@ public class MealService : IMealService
         return entries.Select(ToDto).ToList();
     }
 
-    public async Task<MealEntryDto?> GetByIdAsync(Guid id)
+    public async Task<MealEntryDto?> GetByIdAsync(Guid id, Guid userId)
     {
-        var entry = await LoadEntryAsync(id);
+        var entry = await LoadEntryAsync(id, userId);
         return entry == null ? null : ToDto(entry);
     }
 
     public async Task<MealEntryDto> CreateAsync(CreateMealEntryRequest request, Guid userId)
     {
+        await ValidateDishOwnershipAsync(request.DishTemplateId, userId);
         var entry = new MealEntry
         {
             UserId = userId,
@@ -64,7 +65,7 @@ public class MealService : IMealService
         _context.MealEntries.Add(entry);
         await _context.SaveChangesAsync();
 
-        return ToDto((await LoadEntryAsync(entry.Id))!);
+        return ToDto((await LoadEntryAsync(entry.Id, userId))!);
     }
 
     public async Task<MealEntryDto?> UpdateAsync(Guid id, UpdateMealEntryRequest request, Guid userId)
@@ -75,6 +76,7 @@ public class MealService : IMealService
 
         if (entry == null)
             return null;
+        await ValidateDishOwnershipAsync(request.DishTemplateId, userId);
 
         var eatenAtChanged = entry.EatenAt != request.EatenAt;
         var statusChanged = entry.Status != request.Status;
@@ -105,7 +107,7 @@ public class MealService : IMealService
         }
 
         await _context.SaveChangesAsync();
-        return ToDto((await LoadEntryAsync(id))!);
+        return ToDto((await LoadEntryAsync(id, userId))!);
     }
 
     public async Task<bool> DeleteAsync(Guid id, Guid userId)
@@ -130,12 +132,20 @@ public class MealService : IMealService
         return _mealTypeHelper.ResolveMealType(eatenAt.Value);
     }
 
-    private async Task<MealEntry?> LoadEntryAsync(Guid id) =>
+    private async Task<MealEntry?> LoadEntryAsync(Guid id, Guid userId) =>
         await _context
             .MealEntries.Include(me => me.Items)
                 .ThenInclude(i => i.FoodItem)
             .Include(me => me.DishTemplate)
-            .FirstOrDefaultAsync(me => me.Id == id);
+            .FirstOrDefaultAsync(me => me.Id == id && me.UserId == userId);
+
+    private async Task ValidateDishOwnershipAsync(Guid? dishId, Guid userId)
+    {
+        if (dishId is null) return;
+        var available = await _context.DishTemplates.AnyAsync(dish => dish.Id == dishId
+            && (dish.IsShared || dish.OwnerUserId == null || dish.OwnerUserId == userId));
+        if (!available) throw new ArgumentException("Dish template is not available.");
+    }
 
     private static MealEntryDto ToDto(MealEntry me)
     {

@@ -8,3 +8,4 @@ Household.Api.Tests
 *.db
 *.db-shm
 *.db-wal
+compose-backups

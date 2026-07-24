@@ -1,5 +1,6 @@
 using Household.Api.Application.Interfaces;
 using Household.Api.Helpers;
+using Household.Api.DTOs;
 
 namespace Household.Api.Endpoints;
 
@@ -18,6 +19,7 @@ public static class PokemonModuleEndpoints
                 int? take,
                 HttpContext context,
                 IBeastVaultClient client,
+                IUserSettingsService settings,
                 CancellationToken ct
             ) =>
             {
@@ -27,9 +29,9 @@ public static class PokemonModuleEndpoints
                 if (!TryParseTagIds(tagIds, out var parsedTagIds))
                     return Results.BadRequest(new { message = "tag_ids_must_be_positive_integers" });
 
-                return Results.Ok(
-                    await client.GetPokemonAsync(userId.Value, search, parsedTagIds, skip ?? 0, take ?? 24, ct)
-                );
+                var preferences = await settings.GetPreferencesAsync(userId.Value, ct);
+                return Results.Ok(await client.GetPokemonAsync(
+                    userId.Value, search, parsedTagIds, preferences.PokemonSpriteSource, skip ?? 0, take ?? 24, ct));
             }
         );
 
@@ -40,6 +42,39 @@ public static class PokemonModuleEndpoints
                 ? Results.Unauthorized()
                 : Results.Ok(await client.GetTagsAsync(userId.Value, ct));
         });
+
+        group.MapGet("/sprites/{speciesId:int}", async (
+            int speciesId,
+            bool? shiny,
+            string? source,
+            HttpContext context,
+            IBeastVaultClient client,
+            IUserSettingsService settings,
+            CancellationToken ct) =>
+        {
+            var userId = context.GetUserId();
+            if (userId is null) return Results.Unauthorized();
+            var preferences = await settings.GetPreferencesAsync(userId.Value, ct);
+            var sprite = await client.GetSpriteAsync(userId.Value, speciesId, shiny ?? false, source ?? preferences.PokemonSpriteSource, ct);
+            context.Response.Headers.CacheControl = "private, no-store";
+            return sprite is null
+                ? Results.NotFound()
+                : Results.File(sprite.Value.Content, sprite.Value.ContentType, enableRangeProcessing: false);
+        }).RequireRateLimiting("asset");
+
+        group.MapGet("/{id:int}/download", async (
+            int id,
+            HttpContext context,
+            IBeastVaultClient client,
+            CancellationToken ct) =>
+        {
+            var userId = context.GetUserId();
+            if (userId is null) return Results.Unauthorized();
+            var file = await client.DownloadPokemonAsync(userId.Value, id, ct);
+            return file is null
+                ? Results.NotFound()
+                : Results.File(file.Value.Content, file.Value.ContentType, file.Value.FileName, enableRangeProcessing: false);
+        }).RequireRateLimiting("download");
     }
 
     private static bool TryParseTagIds(string? value, out IReadOnlyList<int> tagIds)

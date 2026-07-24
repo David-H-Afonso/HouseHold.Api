@@ -32,8 +32,8 @@ public class HouseholdProviderRegistry
             new("doit", "DoIt", _settings.DoItBaseUrl, _settings.DoItOpenUrl, "/integrations/household/authorize", ["profile.read", "tasks.read", "tasks.complete", "tasks.undo", "tasks.create"]),
             new("games-database", "Games Database", _settings.GamesDatabaseBaseUrl, _settings.GamesDatabaseOpenUrl, "/#/integrations/household/authorize", ["profile.read", "games.read", "games.status.write"]),
             new("jellywatch", "Jellywatch", _settings.JellywatchBaseUrl, _settings.JellywatchOpenUrl, "/#/integrations/household/authorize", ["profile.read", "activity.read", "upcoming.read", "media.state.write", "media.rating.write"]),
-            new("beast-vault", "Beast Vault", _settings.BeastVaultBaseUrl, _settings.BeastVaultOpenUrl, "/integrations/household/authorize", ["profile.read", "pokemon.read", "pokemon.favorite.write", "pokemon.notes.write"]),
-            new("warcraft-archive", "Warcraft Archive", _settings.WarcraftArchiveBaseUrl, _settings.WarcraftArchiveOpenUrl, "/#/integrations/household/authorize", ["profile.read", "dashboard.read"]),
+            new("beast-vault", "Beast Vault", _settings.BeastVaultBaseUrl, _settings.BeastVaultOpenUrl, "/integrations/household/authorize", ["profile.read", "pokemon.read", "pokemon.favorite.write", "pokemon.notes.write", "pokemon.download"]),
+            new("warcraft-archive", "Warcraft Archive", _settings.WarcraftArchiveBaseUrl, _settings.WarcraftArchiveOpenUrl, "/#/integrations/household/authorize", ["profile.read", "dashboard.read", "tracking.status.write"]),
         ];
     }
 

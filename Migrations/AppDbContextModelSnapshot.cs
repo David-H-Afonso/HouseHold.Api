@@ -17,6 +17,39 @@ namespace Household.Api.Migrations
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "9.0.0");
 
+            modelBuilder.Entity("Household.Api.Models.Auth.AuditEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ActorUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SummaryJson")
+                        .HasMaxLength(4000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("TargetUserId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ActorUserId");
+
+                    b.HasIndex("CreatedAt");
+
+                    b.ToTable("AuditEvents");
+                });
+
             modelBuilder.Entity("Household.Api.Models.Auth.RefreshToken", b =>
                 {
                     b.Property<Guid>("Id")
@@ -82,6 +115,12 @@ namespace Household.Api.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("RequiresPasswordChange")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("SessionVersion")
+                        .HasColumnType("INTEGER");
+
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("TEXT");
 
@@ -96,6 +135,106 @@ namespace Household.Api.Migrations
                         .IsUnique();
 
                     b.ToTable("Users");
+                });
+
+            modelBuilder.Entity("Household.Api.Models.Auth.UserInvitation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasMaxLength(320)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsAdmin")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("RedeemedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("RedeemedUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UserName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("RedeemedUserId");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.HasIndex("Email", "ExpiresAt");
+
+                    b.ToTable("UserInvitations");
+                });
+
+            modelBuilder.Entity("Household.Api.Models.Auth.UserPreference", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("GamesStatusOrderJson")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("HiddenGitHubReposJson")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("JellyfinUserId")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PokemonSpriteSource")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("SchemaVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("TimeZoneId")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("VisualPreference")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("UserId");
+
+                    b.ToTable("UserPreferences");
                 });
 
             modelBuilder.Entity("Household.Api.Models.Food.DishTemplate", b =>
@@ -408,6 +547,9 @@ namespace Household.Api.Migrations
                     b.Property<bool>("IsActive")
                         .HasColumnType("INTEGER");
 
+                    b.Property<Guid?>("OwnerUserId")
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid?>("RoomId")
                         .HasColumnType("TEXT");
 
@@ -431,6 +573,8 @@ namespace Household.Api.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("AssignedToUserId");
+
+                    b.HasIndex("OwnerUserId");
 
                     b.HasIndex("RoomId");
 
@@ -573,8 +717,20 @@ namespace Household.Api.Migrations
                     b.Property<int>("Position")
                         .HasColumnType("INTEGER");
 
+                    b.Property<int>("SchemaVersion")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1);
+
                     b.Property<string>("SettingsJson")
                         .HasColumnType("TEXT");
+
+                    b.Property<string>("Size")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("medium");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("TEXT");
@@ -592,6 +748,9 @@ namespace Household.Api.Migrations
                     b.HasIndex("IntegrationId");
 
                     b.HasIndex("UserId", "Position");
+
+                    b.HasIndex("UserId", "WidgetType")
+                        .IsUnique();
 
                     b.ToTable("DashboardWidgets");
                 });
@@ -865,11 +1024,80 @@ namespace Household.Api.Migrations
                     b.ToTable("IntegrationSecrets");
                 });
 
+            modelBuilder.Entity("Household.Api.Models.Integrations.UserAppFavorite", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AppId")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("Favorite")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(true);
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "AppId")
+                        .IsUnique();
+
+                    b.ToTable("UserAppFavorites");
+                });
+
+            modelBuilder.Entity("Household.Api.Models.Auth.AuditEvent", b =>
+                {
+                    b.HasOne("Household.Api.Models.Auth.User", "ActorUser")
+                        .WithMany()
+                        .HasForeignKey("ActorUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("ActorUser");
+                });
+
             modelBuilder.Entity("Household.Api.Models.Auth.RefreshToken", b =>
                 {
                     b.HasOne("Household.Api.Models.Auth.User", "User")
                         .WithMany("RefreshTokens")
                         .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Household.Api.Models.Auth.UserInvitation", b =>
+                {
+                    b.HasOne("Household.Api.Models.Auth.User", "CreatedByUser")
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Household.Api.Models.Auth.User", "RedeemedUser")
+                        .WithMany()
+                        .HasForeignKey("RedeemedUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("CreatedByUser");
+
+                    b.Navigation("RedeemedUser");
+                });
+
+            modelBuilder.Entity("Household.Api.Models.Auth.UserPreference", b =>
+                {
+                    b.HasOne("Household.Api.Models.Auth.User", "User")
+                        .WithOne("Preference")
+                        .HasForeignKey("Household.Api.Models.Auth.UserPreference", "UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
@@ -1003,12 +1231,19 @@ namespace Household.Api.Migrations
                         .HasForeignKey("AssignedToUserId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("Household.Api.Models.Auth.User", "OwnerUser")
+                        .WithMany()
+                        .HasForeignKey("OwnerUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("Household.Api.Models.Home.Room", "Room")
                         .WithMany("TaskTemplates")
                         .HasForeignKey("RoomId")
                         .OnDelete(DeleteBehavior.SetNull);
 
                     b.Navigation("AssignedToUser");
+
+                    b.Navigation("OwnerUser");
 
                     b.Navigation("Room");
                 });
@@ -1020,7 +1255,15 @@ namespace Household.Api.Migrations
                         .HasForeignKey("IntegrationId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("Household.Api.Models.Auth.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
                     b.Navigation("Integration");
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("Household.Api.Models.Integrations.HouseholdAuthorizationAttempt", b =>
@@ -1066,11 +1309,26 @@ namespace Household.Api.Migrations
                     b.Navigation("Integration");
                 });
 
+            modelBuilder.Entity("Household.Api.Models.Integrations.UserAppFavorite", b =>
+                {
+                    b.HasOne("Household.Api.Models.Auth.User", "User")
+                        .WithMany("AppFavorites")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("Household.Api.Models.Auth.User", b =>
                 {
+                    b.Navigation("AppFavorites");
+
                     b.Navigation("HouseholdAuthorizationAttempts");
 
                     b.Navigation("HouseholdConsumerConnections");
+
+                    b.Navigation("Preference");
 
                     b.Navigation("RefreshTokens");
                 });

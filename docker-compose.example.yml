@@ -1,0 +1,22 @@
+services:
+  household-api:
+    build: .
+    image: household-api:latest
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+      DATABASE_PATH: /data/household.db
+      DATA_PROTECTION_KEYS_PATH: /data/keys
+      CASAOS_COMPOSE_BACKUP_ROOT: /data/compose-backups
+      # Set JWT_SECRET_KEY and CORS_ALLOWED_ORIGINS through CasaOS/hosting secrets.
+      # Configure the CasaOS internal URL/raw JWT through the admin-only write API;
+      # never ship the raw CasaOS JWT to the browser or put it in this example.
+    volumes:
+      # Persists DB, Data Protection keys, and private compose backups.
+      - household-data:/data
+    ports:
+      - "2001:8080"
+
+volumes:
+  household-data:

@@ -74,6 +74,8 @@ public static class AdminRecoveryCommand
 
         adminUser.PasswordHash = BCrypt.Net.BCrypt.HashPassword(password, workFactor: 12);
         adminUser.IsActive = true;
+        adminUser.RequiresPasswordChange = false;
+        adminUser.SessionVersion++;
         await db
             .RefreshTokens.Where(token => token.UserId == adminUser.Id && token.RevokedAt == null)
             .ExecuteUpdateAsync(setters => setters.SetProperty(token => token.RevokedAt, DateTime.UtcNow), cancellationToken);

@@ -44,5 +44,7 @@ public class HouseholdProviderRegistryTests
             "https://api.household.example/integrations/callback/games-database",
             games.RedirectUri
         );
+        Assert.Contains("pokemon.download", providers.Single(provider => provider.Id == "beast-vault").Scopes);
+        Assert.Contains("tracking.status.write", providers.Single(provider => provider.Id == "warcraft-archive").Scopes);
     }
 }
