@@ -178,7 +178,7 @@ public sealed class UserSettingsService(AppDbContext db) : IUserSettingsService
 
     private static UserPreferencesDto ToDto(UserPreference preference) => new(
         preference.SchemaVersion,
-        preference.TimeZoneId,
+        preference.TimeZoneId ?? TimeZoneInfo.Utc.Id,
         preference.VisualPreference,
         preference.PokemonSpriteSource,
         DeserializeList<int>(preference.GamesStatusOrderJson),
