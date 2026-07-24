@@ -36,6 +36,8 @@ public sealed class BeastVaultClient : HouseholdProviderClientBase, IBeastVaultC
             new("search", search),
             new("skip", Math.Max(skip, 0).ToString()),
             new("take", Math.Clamp(take, 1, 100).ToString()),
+            new("sortBy", "CreatedAt"),
+            new("sortDirection", "Descending"),
         };
         values.AddRange(tagIds.Distinct().Take(25).Select(tagId => new KeyValuePair<string, string?>("tagIds", tagId.ToString())));
         var source = await GetRequiredAsync<SourceList>(
@@ -59,6 +61,7 @@ public sealed class BeastVaultClient : HouseholdProviderClientBase, IBeastVaultC
                 item.Type2,
                 $"/modules/pokemon/sprites/{item.SpeciesId}?shiny={item.IsShiny.ToString().ToLowerInvariant()}&source={Uri.EscapeDataString(spriteSource)}",
                 BuildFallbackSpriteUrl(item.SpeciesId, item.IsShiny),
+                item.ImportedAt,
                 item.Tags.Select(tag => new PokemonTagDto(
                     tag.Id,
                     tag.Name,
@@ -161,13 +164,16 @@ public sealed class BeastVaultClient : HouseholdProviderClientBase, IBeastVaultC
     {
         if (string.IsNullOrWhiteSpace(imagePath)) return null;
         var candidate = imagePath.Trim();
+        if (candidate.Length > 2048 || candidate.Any(char.IsControl)) return null;
         if (Uri.TryCreate(candidate, UriKind.Absolute, out var absolute))
         {
+            if (absolute.Scheme != Uri.UriSchemeHttps || string.IsNullOrWhiteSpace(absolute.Host) || !string.IsNullOrEmpty(absolute.UserInfo))
+                return null;
             var configured = _settings.BeastVaultOpenUrl?.TrimEnd('/');
             if (!Uri.TryCreate(configured, UriKind.Absolute, out var configuredUri)
                 || !string.Equals(absolute.Host, configuredUri.Host, StringComparison.OrdinalIgnoreCase)
                 || absolute.Port != configuredUri.Port)
-                return null;
+                return new UriBuilder(absolute) { Fragment = string.Empty }.Uri.AbsoluteUri;
             candidate = absolute.PathAndQuery;
         }
 
@@ -206,6 +212,7 @@ public sealed class BeastVaultClient : HouseholdProviderClientBase, IBeastVaultC
         public string? Type1 { get; set; }
         public string? Type2 { get; set; }
         public string? SpriteUrl { get; set; }
+        public DateTime? ImportedAt { get; set; }
         public List<SourceTag> Tags { get; set; } = [];
     }
 

@@ -14,6 +14,7 @@ public static class DoItModuleEndpoints
                 "/",
                 async (
                     string? date,
+                    string? timeZoneId,
                     HttpContext context,
                     IDoItClient client,
                     IUserSettingsService settings,
@@ -26,12 +27,13 @@ public static class DoItModuleEndpoints
                         return Results.BadRequest(new { message = "date_must_use_yyyy_mm_dd" });
 
                     var preferences = await settings.GetPreferencesAsync(userId.Value, ct);
-                    var timeZoneId = preferences.TimeZoneId ?? "UTC";
-                    var explicitDate = requestedDate ?? GetLocalDate(timeZoneId);
+                    if (!TryResolveTimeZoneId(timeZoneId, preferences.TimeZoneId, out var resolvedTimeZoneId))
+                        return Results.BadRequest(new { message = "invalid_time_zone" });
+                    var explicitDate = requestedDate ?? GetLocalDate(resolvedTimeZoneId);
                     return Results.Ok(await client.GetNowAsync(
                         userId.Value,
                         explicitDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-                        timeZoneId,
+                        resolvedTimeZoneId,
                         ct));
                 }
             );
@@ -39,6 +41,7 @@ public static class DoItModuleEndpoints
         group.MapPost("/occurrences/{occurrenceId:guid}/complete", async (
             Guid occurrenceId,
             string? date,
+            string? timeZoneId,
             HttpContext context,
             IDoItClient client,
             IUserSettingsService settings,
@@ -49,18 +52,20 @@ public static class DoItModuleEndpoints
             if (!TryParseDate(date, out var requestedDate))
                 return Results.BadRequest(new { message = "date_must_use_yyyy_mm_dd" });
             var preferences = await settings.GetPreferencesAsync(userId.Value, ct);
-            var timeZoneId = preferences.TimeZoneId ?? "UTC";
+            if (!TryResolveTimeZoneId(timeZoneId, preferences.TimeZoneId, out var resolvedTimeZoneId))
+                return Results.BadRequest(new { message = "invalid_time_zone" });
             return Results.Ok(await client.CompleteOccurrenceAsync(
                 userId.Value,
                 occurrenceId,
                 requestedDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-                timeZoneId,
+                resolvedTimeZoneId,
                 ct));
         }).RequireRateLimiting("mutation");
 
         group.MapPost("/occurrences/{occurrenceId:guid}/undo", async (
             Guid occurrenceId,
             string? date,
+            string? timeZoneId,
             HttpContext context,
             IDoItClient client,
             IUserSettingsService settings,
@@ -71,12 +76,13 @@ public static class DoItModuleEndpoints
             if (!TryParseDate(date, out var requestedDate))
                 return Results.BadRequest(new { message = "date_must_use_yyyy_mm_dd" });
             var preferences = await settings.GetPreferencesAsync(userId.Value, ct);
-            var timeZoneId = preferences.TimeZoneId ?? "UTC";
+            if (!TryResolveTimeZoneId(timeZoneId, preferences.TimeZoneId, out var resolvedTimeZoneId))
+                return Results.BadRequest(new { message = "invalid_time_zone" });
             return Results.Ok(await client.UndoOccurrenceAsync(
                 userId.Value,
                 occurrenceId,
                 requestedDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-                timeZoneId,
+                resolvedTimeZoneId,
                 ct));
         }).RequireRateLimiting("mutation");
     }
@@ -101,4 +107,21 @@ public static class DoItModuleEndpoints
 
     private static DateOnly GetLocalDate(string timeZoneId) => DateOnly.FromDateTime(
         TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, TimeZoneInfo.FindSystemTimeZoneById(timeZoneId)));
+
+    private static bool TryResolveTimeZoneId(string? requested, string? stored, out string timeZoneId)
+    {
+        timeZoneId = !string.IsNullOrWhiteSpace(requested)
+            ? requested.Trim()
+            : !string.IsNullOrWhiteSpace(stored) ? stored.Trim() : "UTC";
+        if (timeZoneId.Length > 100 || timeZoneId.Any(char.IsControl)) return false;
+
+        try
+        {
+            _ = TimeZoneInfo.FindSystemTimeZoneById(timeZoneId);
+            return true;
+        }
+        catch (TimeZoneNotFoundException) { return false; }
+        catch (InvalidTimeZoneException) { return false; }
+        catch (ArgumentException) { return false; }
+    }
 }

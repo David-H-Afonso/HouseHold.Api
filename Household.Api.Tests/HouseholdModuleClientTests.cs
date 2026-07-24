@@ -119,7 +119,7 @@ public class HouseholdModuleClientTests
     public async Task BeastVaultSearch_EncodesTagFiltersAndResolvesSafePublicAssets()
     {
         var handler = new RecordingHandler(_ => JsonResponse("""
-            {"items":[{"id":25,"speciesId":25,"speciesName":"Pikachu","level":20,"isShiny":false,"favorite":true,"isEgg":false,"type1":"Electric","spriteUrl":"/sprites/pokemon/home/25.png","tags":[{"id":3,"name":"Team","colorHex":"#facc15"}]}],"total":1}
+            {"items":[{"id":25,"speciesId":25,"speciesName":"Pikachu","level":20,"isShiny":false,"favorite":true,"isEgg":false,"type1":"Electric","spriteUrl":"/sprites/pokemon/home/25.png","importedAt":"2026-07-24T12:34:56Z","tags":[{"id":3,"name":"Team","colorHex":"#facc15"}]}],"total":1}
             """));
         var access = new StubAccessService("beast-token");
         var client = new BeastVaultClient(
@@ -135,18 +135,42 @@ public class HouseholdModuleClientTests
         Assert.Equal("/modules/pokemon/sprites/25?shiny=false&source=home", pokemon.SpriteUrl);
         Assert.Contains("/other/home/25.png", pokemon.FallbackSpriteUrl);
         Assert.Equal("https://bv.example/pokemon/25", pokemon.OpenUrl);
+        Assert.Equal(new DateTime(2026, 7, 24, 12, 34, 56, DateTimeKind.Utc), pokemon.AddedAt);
         var query = handler.Requests.Single().Uri?.Query ?? string.Empty;
         Assert.Contains("search=pika%20chu", query);
         Assert.Contains("tagIds=3", query);
         Assert.Contains("tagIds=8", query);
+        Assert.Contains("sortBy=CreatedAt", query);
+        Assert.Contains("sortDirection=Descending", query);
         Assert.Equal("pokemon.read", access.Requests.Single().Scope);
     }
 
     [Fact]
-    public async Task BeastVaultSearch_DoesNotReturnProviderSuppliedAbsoluteTagUrl()
+    public async Task BeastVaultSearch_ReturnsSafeHttpsTagUrlForDirectBrowserLoading()
     {
         var handler = new RecordingHandler(_ => JsonResponse("""
-            {"items":[{"id":25,"speciesId":25,"speciesName":"Pikachu","level":20,"tags":[{"id":3,"name":"Team","imagePath":"https://attacker.example/track.png"}]}],"total":1}
+            {"items":[{"id":25,"speciesId":25,"speciesName":"Pikachu","level":20,"tags":[{"id":3,"name":"Team","imagePath":"https://assets.example/team.png"}]}],"total":1}
+            """));
+        var client = new BeastVaultClient(
+            new HttpClient(handler),
+            new StubAccessService("beast-token"),
+            Options.Create(new HouseholdConnectionSettings { BeastVaultOpenUrl = "https://bv.example" }),
+            Options.Create(new ExternalIntegrationSettings())
+        );
+
+        var result = await client.GetPokemonAsync(Guid.NewGuid(), null, [], "home", 0, 24, CancellationToken.None);
+
+        Assert.Equal("https://assets.example/team.png", Assert.Single(Assert.Single(result.Items).Tags).ImageUrl);
+    }
+
+    [Theory]
+    [InlineData("http://assets.example/team.png")]
+    [InlineData("https://user:password@assets.example/team.png")]
+    [InlineData("javascript:alert(1)")]
+    public async Task BeastVaultSearch_RejectsUnsafeAbsoluteTagUrl(string imagePath)
+    {
+        var handler = new RecordingHandler(_ => JsonResponse($$"""
+            {"items":[{"id":25,"speciesId":25,"speciesName":"Pikachu","level":20,"tags":[{"id":3,"name":"Team","imagePath":"{{imagePath}}"}]}],"total":1}
             """));
         var client = new BeastVaultClient(
             new HttpClient(handler),

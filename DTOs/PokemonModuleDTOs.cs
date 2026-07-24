@@ -24,6 +24,7 @@ public record PokemonModuleItemDto(
     string? Type2,
     string? SpriteUrl,
     string FallbackSpriteUrl,
+    DateTime? AddedAt,
     IReadOnlyList<PokemonTagDto> Tags,
     string? OpenUrl
 );
