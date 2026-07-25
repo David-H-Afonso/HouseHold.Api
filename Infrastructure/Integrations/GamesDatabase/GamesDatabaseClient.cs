@@ -37,9 +37,14 @@ public class GamesDatabaseClient : HouseholdProviderClientBase, IGamesDatabaseCl
 
     public async Task<(byte[] Content, string ContentType)?> GetAssetAsync(Guid userId, int id, string kind, CancellationToken cancellationToken)
     {
-        if (id <= 0 || kind is not ("cover" or "logo")) return null;
+        if (id <= 0 || kind is not ("cover" or "logo" or "hero")) return null;
         var game = await SendAsync<GameDto>(userId, "games.read", HttpMethod.Get, $"/api/games/{id}", null, cancellationToken);
-        var source = kind == "cover" ? game?.Cover : game?.Logo;
+        var source = kind switch
+        {
+            "cover" => game?.Cover,
+            "hero" => game?.Hero,
+            _ => game?.Logo,
+        };
         var path = BuildProviderPath(source);
         if (path is null) return null;
         var file = await DownloadAsync(userId, "games.read", path, 8 * 1024 * 1024, cancellationToken);
@@ -330,6 +335,7 @@ public class GamesDatabaseClient : HouseholdProviderClientBase, IGamesDatabaseCl
             game.PlatformName,
             BuildAssetUrl(game.Id, "logo", game.Logo),
             BuildAssetUrl(game.Id, "cover", game.Cover),
+            BuildAssetUrl(game.Id, "hero", game.Hero),
             game.Grade,
             game.Score,
             game.Started,
@@ -442,6 +448,7 @@ public class GamesDatabaseClient : HouseholdProviderClientBase, IGamesDatabaseCl
         public string? Comment { get; set; }
         public string? Logo { get; set; }
         public string? Cover { get; set; }
+        public string? Hero { get; set; }
         public int? SteamAppId { get; set; }
         public int? SteamPlaytimeForever { get; set; }
         public string? StatusName { get; set; }

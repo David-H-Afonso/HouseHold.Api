@@ -8,6 +8,7 @@ public record GameModuleItemDto(
     string? PlatformName,
     string? Logo,
     string? Cover,
+    string? Hero,
     int? Grade,
     decimal? Score,
     string? Started,

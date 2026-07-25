@@ -1,6 +1,7 @@
 using Household.Api.Application.Interfaces;
 using Household.Api.DTOs;
 using Household.Api.Helpers;
+using System.Security.Cryptography;
 
 namespace Household.Api.Endpoints;
 
@@ -63,7 +64,15 @@ public static class GamesModuleEndpoints
             var userId = context.GetUserId();
             if (userId is null) return Results.Unauthorized();
             var asset = await client.GetAssetAsync(userId.Value, id, kind, ct);
-            return asset is null ? Results.NotFound() : Results.File(asset.Value.Content, asset.Value.ContentType, enableRangeProcessing: false);
+            if (asset is null) return Results.NotFound();
+
+            var etag = $"\"{Convert.ToHexString(SHA256.HashData(asset.Value.Content))}\"";
+            context.Response.Headers.ETag = etag;
+            context.Response.Headers.CacheControl = "private, max-age=3600, must-revalidate";
+            if (context.Request.Headers.IfNoneMatch.Any(value => value == etag))
+                return Results.StatusCode(StatusCodes.Status304NotModified);
+
+            return Results.File(asset.Value.Content, asset.Value.ContentType, enableRangeProcessing: false);
         }).RequireRateLimiting("asset");
 
         group.MapPatch(
