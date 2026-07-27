@@ -450,6 +450,13 @@ public sealed class CasaOsUpdateService : ICasaOsUpdateService
                 "casaos_redirect_refused"
             );
 
+        if (response.StatusCode == HttpStatusCode.Unauthorized)
+            throw new IntegrationGatewayException(
+                HttpStatusCode.Conflict,
+                "CasaOS authorization expired or is invalid. Reconnect CasaOS with a fresh JWT.",
+                "casaos_reconnect_required"
+            );
+
         if (response.StatusCode != HttpStatusCode.OK)
             throw new IntegrationGatewayException(
                 HttpStatusCode.BadGateway,
