@@ -101,7 +101,7 @@ public class AppLauncherConfigLoader : IAppLauncherConfigLoader
         string name,
         string category,
         string description,
-        string? internalUrl,
+        string? apiUrl,
         string? openUrl
     ) => new()
     {
@@ -109,10 +109,10 @@ public class AppLauncherConfigLoader : IAppLauncherConfigLoader
         Name = name,
         Category = category,
         Description = description,
-        InternalUrl = internalUrl,
+        InternalUrl = openUrl,
         ExternalUrl = openUrl,
         OpenUrl = openUrl,
-        HealthCheckUrl = AppendPath(internalUrl, "health"),
+        HealthCheckUrl = AppendPath(apiUrl, "health"),
         Favorite = true,
     };
 
