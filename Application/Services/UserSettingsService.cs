@@ -22,6 +22,7 @@ public sealed class UserSettingsService(AppDbContext db) : IUserSettingsService
         new("apps", "Applications", "small", ["small", "medium", "large"], true),
         new("games", "Games", "medium", ["medium", "large"], true),
         new("doit", "Today", "medium", ["small", "medium", "large"], true),
+        new("calendar", "Calendar", "medium", ["medium", "large"], false),
         new("jellywatch", "Jellywatch", "medium", ["medium", "large"], true),
         new("warcraft", "Warcraft", "medium", ["small", "medium", "large"], true),
         new("pokemon", "Pokemon", "medium", ["medium", "large"], false),

@@ -48,6 +48,24 @@ public sealed class DoItClient(HttpClient httpClient, IHouseholdProviderAccessSe
         );
     }
 
+    public async Task<IReadOnlyList<DoItCalendarEventDto>> GetCalendarEventsAsync(
+        Guid userId,
+        DateTimeOffset? from,
+        DateTimeOffset? to,
+        CancellationToken cancellationToken)
+    {
+        var query = BuildQuery(new Dictionary<string, string?>
+        {
+            ["from"] = from?.ToUniversalTime().ToString("O"),
+            ["to"] = to?.ToUniversalTime().ToString("O"),
+        });
+        return await GetRequiredAsync<List<DoItCalendarEventDto>>(
+            userId,
+            "calendar.read",
+            $"/api/integrations/household/v1/calendar/events{query}",
+            cancellationToken);
+    }
+
     public async Task<DoItOccurrenceActionDto> CompleteOccurrenceAsync(
         Guid userId,
         Guid occurrenceId,

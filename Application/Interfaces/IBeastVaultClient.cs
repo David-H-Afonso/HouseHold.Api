@@ -11,6 +11,7 @@ public interface IBeastVaultClient
         string spriteSource,
         int skip,
         int take,
+        bool? favorite,
         CancellationToken cancellationToken
     );
 

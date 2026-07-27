@@ -17,6 +17,7 @@ public static class PokemonModuleEndpoints
                 string? tagIds,
                 int? skip,
                 int? take,
+                bool? favorite,
                 HttpContext context,
                 IBeastVaultClient client,
                 IUserSettingsService settings,
@@ -31,7 +32,7 @@ public static class PokemonModuleEndpoints
 
                 var preferences = await settings.GetPreferencesAsync(userId.Value, ct);
                 return Results.Ok(await client.GetPokemonAsync(
-                    userId.Value, search, parsedTagIds, preferences.PokemonSpriteSource, skip ?? 0, take ?? 24, ct));
+                    userId.Value, search, parsedTagIds, preferences.PokemonSpriteSource, skip ?? 0, take ?? 24, favorite, ct));
             }
         );
 

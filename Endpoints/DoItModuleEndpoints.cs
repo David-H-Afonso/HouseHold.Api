@@ -85,6 +85,20 @@ public static class DoItModuleEndpoints
                 resolvedTimeZoneId,
                 ct));
         }).RequireRateLimiting("mutation");
+
+        var calendarGroup = app.MapGroup("/modules/calendar").WithTags("Calendar").RequireAuthorization();
+        calendarGroup.MapGet("/events", async (
+            DateTimeOffset? from,
+            DateTimeOffset? to,
+            IDoItClient client,
+            HttpContext context,
+            CancellationToken ct) =>
+        {
+            var userId = context.GetUserId();
+            return userId is null
+                ? Results.Unauthorized()
+                : Results.Ok(await client.GetCalendarEventsAsync(userId.Value, from, to, ct));
+        });
     }
 
     private static bool TryParseDate(string? value, out DateOnly? date)

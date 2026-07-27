@@ -36,3 +36,27 @@ public record DoItOccurrenceActionDto(
     string OccurrenceDate,
     string OccurrenceStatus
 );
+
+public record DoItCalendarReminderDto(
+    Guid Id,
+    int OffsetMinutes,
+    bool IsEnabled,
+    DateTime? AcknowledgedAt,
+    DateTime DueAtUtc
+);
+
+public record DoItCalendarEventDto(
+    Guid Id,
+    string Title,
+    string? Description,
+    Guid? ZoneId,
+    string? ZoneName,
+    DateTime StartAtUtc,
+    DateTime EndAtUtc,
+    bool IsAllDay,
+    string TimeZoneId,
+    bool IsCancelled,
+    DateTime CreatedAt,
+    DateTime UpdatedAt,
+    IReadOnlyList<DoItCalendarReminderDto> Reminders
+);

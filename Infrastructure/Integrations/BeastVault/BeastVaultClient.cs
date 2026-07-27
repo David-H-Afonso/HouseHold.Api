@@ -21,6 +21,16 @@ public sealed class BeastVaultClient : HouseholdProviderClientBase, IBeastVaultC
         _externalSettings = externalSettings.Value;
     }
 
+    public Task<PokemonModuleListDto> GetPokemonAsync(
+        Guid userId,
+        string? search,
+        IReadOnlyList<int> tagIds,
+        string spriteSource,
+        int skip,
+        int take,
+        CancellationToken cancellationToken
+    ) => GetPokemonAsync(userId, search, tagIds, spriteSource, skip, take, null, cancellationToken);
+
     public async Task<PokemonModuleListDto> GetPokemonAsync(
         Guid userId,
         string? search,
@@ -28,6 +38,7 @@ public sealed class BeastVaultClient : HouseholdProviderClientBase, IBeastVaultC
         string spriteSource,
         int skip,
         int take,
+        bool? favorite,
         CancellationToken cancellationToken
     )
     {
@@ -38,6 +49,7 @@ public sealed class BeastVaultClient : HouseholdProviderClientBase, IBeastVaultC
             new("take", Math.Clamp(take, 1, 100).ToString()),
             new("sortBy", "CreatedAt"),
             new("sortDirection", "Descending"),
+            new("favorite", favorite?.ToString().ToLowerInvariant()),
         };
         values.AddRange(tagIds.Distinct().Take(25).Select(tagId => new KeyValuePair<string, string?>("tagIds", tagId.ToString())));
         var source = await GetRequiredAsync<SourceList>(
