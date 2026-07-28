@@ -38,6 +38,7 @@ public static class CasaOsUpdatePolicy
 {
     public const string IntegrationName = "CasaOS Update Operations";
     public const string TokenSecretKey = "raw-jwt";
+    public const string RefreshTokenSecretKey = "refresh-jwt";
     public const string UpdateAction = "casaos.compose.update";
     public const string RollbackAction = "casaos.compose.rollback";
 

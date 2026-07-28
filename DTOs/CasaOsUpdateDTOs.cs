@@ -2,9 +2,9 @@ using Household.Api.Models.Integrations;
 
 namespace Household.Api.DTOs;
 
-public sealed record CasaOsUpdateConfigDto(bool Configured, bool HasToken);
+public sealed record CasaOsUpdateConfigDto(bool Configured, bool HasToken, bool HasRefreshToken);
 
-public sealed record UpdateCasaOsUpdateConfigRequest(string InternalBaseUrl, string? RawToken);
+public sealed record UpdateCasaOsUpdateConfigRequest(string InternalBaseUrl, string? RawToken, string? RawRefreshToken = null);
 
 public sealed record CasaOsUpdateRequest(string Confirmation);
 

@@ -23,6 +23,7 @@ public sealed class CasaOsUpdateService : ICasaOsUpdateService
     private const int HistoryLimit = 50;
     private const int MaxAuditImages = 8;
     private const int MaxAuditImageLength = 300;
+    private static readonly SemaphoreSlim TokenRefreshLock = new(1, 1);
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _appLocks;
     private static readonly Regex RawJwtPattern = new(
@@ -122,8 +123,27 @@ public sealed class CasaOsUpdateService : ICasaOsUpdateService
             secret.ProtectedValue = _tokenProtector.Protect(token);
         }
 
+        if (!string.IsNullOrEmpty(request.RawRefreshToken))
+        {
+            var refreshToken = NormalizeRawJwt(request.RawRefreshToken);
+            var secret = integration.Secrets.SingleOrDefault(item => item.SecretKey == CasaOsUpdatePolicy.RefreshTokenSecretKey);
+            if (secret is null)
+            {
+                secret = new IntegrationSecret { SecretKey = CasaOsUpdatePolicy.RefreshTokenSecretKey };
+                integration.Secrets.Add(secret);
+            }
+
+            secret.ProtectedValue = _tokenProtector.Protect(refreshToken);
+        }
+
         await _db.SaveChangesAsync(cancellationToken);
         return ToConfigDto(integration);
+    }
+
+    public async Task<bool> RefreshTokenAsync(CancellationToken cancellationToken)
+    {
+        var connection = await GetConnectionAsync(cancellationToken);
+        return connection is not null && await TryRefreshConnectionAsync(connection, cancellationToken);
     }
 
     public async Task<CasaOsAppCapabilities> GetAppCapabilitiesAsync(CancellationToken cancellationToken)
@@ -135,9 +155,12 @@ public sealed class CasaOsUpdateService : ICasaOsUpdateService
 
         try
         {
-            using var request = CreateRequest(HttpMethod.Get, connection, "v2/app_management/apps/upgradable");
-            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-            using var response = await SendAsync(request, cancellationToken);
+            using var response = await SendAsync(() =>
+            {
+                var request = CreateRequest(HttpMethod.Get, connection, "v2/app_management/apps/upgradable");
+                request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+                return request;
+            }, connection, cancellationToken);
             if (IsRedirect(response.StatusCode) || response.StatusCode != HttpStatusCode.OK)
                 return new CasaOsAppCapabilities(true, availability);
 
@@ -388,13 +411,16 @@ public sealed class CasaOsUpdateService : ICasaOsUpdateService
     )
     {
         var escapedAppId = Uri.EscapeDataString(appId);
-        using var request = CreateRequest(
-            HttpMethod.Get,
-            connection,
-            $"v2/app_management/compose/{escapedAppId}"
-        );
-        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/yaml"));
-        using var response = await SendAsync(request, cancellationToken);
+        using var response = await SendAsync(() =>
+        {
+            var request = CreateRequest(
+                HttpMethod.Get,
+                connection,
+                $"v2/app_management/compose/{escapedAppId}"
+            );
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/yaml"));
+            return request;
+        }, connection, cancellationToken);
         RequireCasaOsOk(response, "fetch compose YAML");
         return await ReadBoundedAsync(response.Content, _maxYamlBytes, "CasaOS YAML response", cancellationToken);
     }
@@ -407,25 +433,30 @@ public sealed class CasaOsUpdateService : ICasaOsUpdateService
     )
     {
         var escapedAppId = Uri.EscapeDataString(appId);
-        using var request = CreateRequest(
-            HttpMethod.Put,
-            connection,
-            $"v2/app_management/compose/{escapedAppId}?dry_run=false&check_port_conflict=true"
-        );
-        request.Content = new ByteArrayContent(yaml);
-        request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/yaml");
-        using var response = await SendAsync(request, cancellationToken);
+        using var response = await SendAsync(() =>
+        {
+            var request = CreateRequest(
+                HttpMethod.Put,
+                connection,
+                $"v2/app_management/compose/{escapedAppId}?dry_run=false&check_port_conflict=true"
+            );
+            request.Content = new ByteArrayContent(yaml);
+            request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/yaml");
+            return request;
+        }, connection, cancellationToken);
         RequireCasaOsOk(response, "queue compose apply");
     }
 
     private async Task<HttpResponseMessage> SendAsync(
-        HttpRequestMessage request,
+        Func<HttpRequestMessage> requestFactory,
+        Connection connection,
         CancellationToken cancellationToken
     )
     {
+        HttpResponseMessage response;
         try
         {
-            return await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            response = await SendHttpRequestAsync(requestFactory(), cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -439,6 +470,38 @@ public sealed class CasaOsUpdateService : ICasaOsUpdateService
                 "casaos_unavailable"
             );
         }
+
+        if (response.StatusCode == HttpStatusCode.Unauthorized
+            && await TryRefreshConnectionAsync(connection, cancellationToken))
+        {
+            response.Dispose();
+            try
+            {
+                return await SendHttpRequestAsync(requestFactory(), cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException)
+            {
+                throw new IntegrationGatewayException(
+                    HttpStatusCode.BadGateway,
+                    "CasaOS is unavailable.",
+                    "casaos_unavailable"
+                );
+            }
+        }
+
+        return response;
+    }
+
+    private async Task<HttpResponseMessage> SendHttpRequestAsync(
+        HttpRequestMessage request,
+        CancellationToken cancellationToken)
+    {
+        using (request)
+            return await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
     }
 
     private static void RequireCasaOsOk(HttpResponseMessage response, string operation)
@@ -499,6 +562,78 @@ public sealed class CasaOsUpdateService : ICasaOsUpdateService
             "casaos_not_configured"
         );
 
+    private async Task<bool> TryRefreshConnectionAsync(Connection connection, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(connection.RawRefreshToken))
+            return false;
+
+        await TokenRefreshLock.WaitAsync(cancellationToken);
+        try
+        {
+            var latest = await GetConnectionAsync(cancellationToken);
+            if (latest is null || string.IsNullOrWhiteSpace(latest.RawRefreshToken))
+                return false;
+
+            using var request = new HttpRequestMessage(
+                HttpMethod.Post,
+                BuildSameOriginUri(latest.BaseUrl, "v1/user/refresh_token"));
+            request.Content = new StringContent(
+                JsonSerializer.Serialize(new { refresh_token = latest.RawRefreshToken }),
+                Encoding.UTF8,
+                "application/json");
+            using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+                return false;
+
+            var content = await ReadBoundedAsync(response.Content, _maxJsonBytes, "CasaOS refresh response", cancellationToken);
+            using var document = JsonDocument.Parse(content);
+            var payload = document.RootElement.TryGetProperty("data", out var data) ? data : document.RootElement;
+            var accessToken = ReadJsonString(payload, "access_token", "accessToken");
+            var refreshToken = ReadJsonString(payload, "refresh_token", "refreshToken");
+            if (accessToken is null || refreshToken is null)
+                return false;
+
+            accessToken = NormalizeRawJwt(accessToken);
+            refreshToken = NormalizeRawJwt(refreshToken);
+            var integration = await LoadIntegrationAsync(cancellationToken);
+            if (integration is null)
+                return false;
+
+            var accessSecret = integration.Secrets.SingleOrDefault(item => item.SecretKey == CasaOsUpdatePolicy.TokenSecretKey);
+            var refreshSecret = integration.Secrets.SingleOrDefault(item => item.SecretKey == CasaOsUpdatePolicy.RefreshTokenSecretKey);
+            if (accessSecret is null || refreshSecret is null)
+                return false;
+
+            accessSecret.ProtectedValue = _tokenProtector.Protect(accessToken);
+            refreshSecret.ProtectedValue = _tokenProtector.Protect(refreshToken);
+            await _db.SaveChangesAsync(cancellationToken);
+            connection.RawToken = accessToken;
+            connection.RawRefreshToken = refreshToken;
+            return true;
+        }
+        catch (Exception exception) when (
+            exception is HttpRequestException or TaskCanceledException or JsonException or CryptographicException or ArgumentException)
+        {
+            _logger.LogWarning("CasaOS token refresh failed ({ErrorType})", exception.GetType().Name);
+            return false;
+        }
+        finally
+        {
+            TokenRefreshLock.Release();
+        }
+    }
+
+    private static string? ReadJsonString(JsonElement element, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            if (element.TryGetProperty(name, out var property) && property.ValueKind == JsonValueKind.String)
+                return property.GetString();
+        }
+
+        return null;
+    }
+
     private async Task<Connection?> GetConnectionAsync(CancellationToken cancellationToken)
     {
         var integration = await LoadIntegrationAsync(cancellationToken);
@@ -516,7 +651,8 @@ public sealed class CasaOsUpdateService : ICasaOsUpdateService
     private CasaOsUpdateConfigDto ToConfigDto(Integration? integration)
     {
         var hasToken = integration?.Secrets.Any(item => item.SecretKey == CasaOsUpdatePolicy.TokenSecretKey) == true;
-        return new CasaOsUpdateConfigDto(TryBuildConnection(integration, out _), hasToken);
+        var hasRefreshToken = integration?.Secrets.Any(item => item.SecretKey == CasaOsUpdatePolicy.RefreshTokenSecretKey) == true;
+        return new CasaOsUpdateConfigDto(TryBuildConnection(integration, out _), hasToken, hasRefreshToken);
     }
 
     private bool TryBuildConnection(Integration? integration, out Connection? connection)
@@ -530,7 +666,9 @@ public sealed class CasaOsUpdateService : ICasaOsUpdateService
         {
             var baseUrl = NormalizeBaseUrl(integration.BaseUrl);
             var rawToken = NormalizeRawJwt(_tokenProtector.Unprotect(secret.ProtectedValue));
-            connection = new Connection(integration.Id, baseUrl, rawToken);
+            var refreshSecret = integration.Secrets.SingleOrDefault(item => item.SecretKey == CasaOsUpdatePolicy.RefreshTokenSecretKey);
+            var rawRefreshToken = refreshSecret is null ? null : NormalizeRawJwt(_tokenProtector.Unprotect(refreshSecret.ProtectedValue));
+            connection = new Connection(integration.Id, baseUrl, rawToken, rawRefreshToken);
             return true;
         }
         catch (Exception exception) when (
@@ -1106,7 +1244,14 @@ public sealed class CasaOsUpdateService : ICasaOsUpdateService
         return value is not null && BackupIdPattern.IsMatch(value) ? value : null;
     }
 
-    private sealed record Connection(Guid IntegrationId, string BaseUrl, string RawToken);
+    private sealed class Connection(Guid integrationId, string baseUrl, string rawToken, string? rawRefreshToken)
+    {
+        public Guid IntegrationId { get; } = integrationId;
+        public string BaseUrl { get; } = baseUrl;
+        public string RawToken { get; set; } = rawToken;
+        public string? RawRefreshToken { get; set; } = rawRefreshToken;
+    }
+
 }
 
 public sealed class CasaOsUpdateLocks

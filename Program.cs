@@ -433,6 +433,7 @@ builder.Services.AddHostedService<GitHubActionsPollingService>();
 builder.Services.AddSingleton<CasaOsUpdateLocks>();
 builder.Services.AddHttpClient<ICasaOsUpdateService, CasaOsUpdateService>()
     .ConfigurePrimaryHttpMessageHandler(NoRedirectHandler);
+builder.Services.AddHostedService<CasaOsTokenRefreshHostedService>();
 builder.Services.AddHttpClient("AppHealth", client => client.Timeout = TimeSpan.FromSeconds(5))
     .ConfigurePrimaryHttpMessageHandler(NoRedirectHandler);
 builder.Services.AddSingleton<HouseholdProviderRegistry>();
