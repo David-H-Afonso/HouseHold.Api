@@ -10,7 +10,7 @@ namespace Household.Api.Tests;
 public sealed class JellyfinServiceTests
 {
     [Fact]
-    public async Task EmptyContinueWatching_FallsBackToFirstThreeNextUpWithoutExposingApiKey()
+    public async Task EmptyContinueWatching_FallsBackToAllNextUpWithoutExposingApiKey()
     {
         await using var fixture = await UserSettingsServiceTests.TestDb.CreateAsync();
         var user = await fixture.AddUserAsync("viewer@example.test");
@@ -33,7 +33,7 @@ public sealed class JellyfinServiceTests
         Assert.True(config.HasApiKey);
         Assert.DoesNotContain("server-secret-key", fixture.Db.IntegrationSecrets.Single().ProtectedValue);
         Assert.True(dashboard.UsedNextUpFallback);
-        Assert.Equal(3, dashboard.DashboardItems.Count);
+        Assert.Equal(4, dashboard.DashboardItems.Count);
         Assert.All(dashboard.DashboardItems, item =>
         {
             Assert.StartsWith("/api/v1/jellyfin/images/", item.ImageUrl);

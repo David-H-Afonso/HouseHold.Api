@@ -84,7 +84,7 @@ public class AppLauncherConfigLoader : IAppLauncherConfigLoader
                 HealthCheckUrl = AppendPath(_connection.ApiPublicUrl, "health"),
                 Favorite = true,
             },
-            CreateProvider("doit", "DoIt", "Tasks", "Task planning and routines", _connection.DoItBaseUrl, _connection.DoItOpenUrl),
+            CreateProvider("doit", "DoIt", "Tasks", "Task planning and routines", _connection.DoItBaseUrl, _connection.DoItOpenUrl, "api/health"),
             CreateProvider("gamesdatabase", "Games Database", "Games", "Personal game collection", _connection.GamesDatabaseBaseUrl, _connection.GamesDatabaseOpenUrl),
             CreateProvider("jellywatch", "Jellywatch", "Media", "Watch tracking and ratings", _connection.JellywatchBaseUrl, _connection.JellywatchOpenUrl),
             CreateProvider("beastvault", "Beast Vault", "Collections", "Pokemon collection manager", _connection.BeastVaultBaseUrl, _connection.BeastVaultOpenUrl),
@@ -102,7 +102,8 @@ public class AppLauncherConfigLoader : IAppLauncherConfigLoader
         string category,
         string description,
         string? apiUrl,
-        string? openUrl
+        string? openUrl,
+        string healthPath = "health"
     ) => new()
     {
         Id = id,
@@ -112,7 +113,7 @@ public class AppLauncherConfigLoader : IAppLauncherConfigLoader
         InternalUrl = openUrl,
         ExternalUrl = openUrl,
         OpenUrl = openUrl,
-        HealthCheckUrl = AppendPath(apiUrl, "health"),
+        HealthCheckUrl = AppendPath(apiUrl, healthPath),
         Favorite = true,
     };
 

@@ -123,7 +123,7 @@ public sealed class JellyfinService : IJellyfinService
         return new JellyfinDashboardDto(
             continueDtos,
             nextDtos,
-            fallback ? nextDtos.Take(3).ToList() : continueDtos,
+            fallback ? nextDtos : continueDtos,
             fallback
         );
     }
