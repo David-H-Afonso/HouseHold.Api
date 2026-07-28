@@ -46,6 +46,7 @@ public static class PokemonModuleEndpoints
 
         group.MapGet("/sprites/{speciesId:int}", async (
             int speciesId,
+            int? spriteId,
             bool? shiny,
             string? source,
             HttpContext context,
@@ -56,7 +57,7 @@ public static class PokemonModuleEndpoints
             var userId = context.GetUserId();
             if (userId is null) return Results.Unauthorized();
             var preferences = await settings.GetPreferencesAsync(userId.Value, ct);
-            var sprite = await client.GetSpriteAsync(userId.Value, speciesId, shiny ?? false, source ?? preferences.PokemonSpriteSource, ct);
+            var sprite = await client.GetSpriteAsync(userId.Value, speciesId, spriteId, shiny ?? false, source ?? preferences.PokemonSpriteSource, ct);
             context.Response.Headers.CacheControl = "private, no-store";
             return sprite is null
                 ? Results.NotFound()

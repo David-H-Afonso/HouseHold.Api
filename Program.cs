@@ -287,7 +287,7 @@ builder.Services.AddRateLimiter(options =>
         context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "unknown", _ => Window(10, TimeSpan.FromMinutes(1))));
     options.AddPolicy("casaos-admin-action", context => RateLimitPartition.GetFixedWindowLimiter(
         $"{context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "unknown"}:{context.Request.RouteValues["appId"] ?? "unknown"}",
-        _ => Window(2, TimeSpan.FromMinutes(10))));
+        _ => Window(6, TimeSpan.FromMinutes(10))));
     options.AddPolicy(
         "integration-callback",
         context =>

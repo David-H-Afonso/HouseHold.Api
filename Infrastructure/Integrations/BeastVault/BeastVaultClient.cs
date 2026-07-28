@@ -64,6 +64,8 @@ public sealed class BeastVaultClient : HouseholdProviderClientBase, IBeastVaultC
                 item.Id,
                 item.SpeciesId,
                 item.SpeciesName,
+                item.FormName,
+                item.SpriteId,
                 item.Nickname,
                 item.Level,
                 item.IsShiny,
@@ -71,8 +73,8 @@ public sealed class BeastVaultClient : HouseholdProviderClientBase, IBeastVaultC
                 item.IsEgg,
                 item.Type1,
                 item.Type2,
-                $"/modules/pokemon/sprites/{item.SpeciesId}?shiny={item.IsShiny.ToString().ToLowerInvariant()}&source={Uri.EscapeDataString(spriteSource)}",
-                BuildFallbackSpriteUrl(item.SpeciesId, item.IsShiny),
+                $"/modules/pokemon/sprites/{item.SpeciesId}?spriteId={Math.Max(item.SpriteId, item.SpeciesId)}&shiny={item.IsShiny.ToString().ToLowerInvariant()}&source={Uri.EscapeDataString(spriteSource)}",
+                BuildFallbackSpriteUrl(Math.Max(item.SpriteId, item.SpeciesId), item.IsShiny),
                 item.ImportedAt,
                 item.Tags.Select(tag => new PokemonTagDto(
                     tag.Id,
@@ -91,19 +93,21 @@ public sealed class BeastVaultClient : HouseholdProviderClientBase, IBeastVaultC
     public async Task<(byte[] Content, string ContentType)?> GetSpriteAsync(
         Guid userId,
         int speciesId,
+        int? spriteId,
         bool shiny,
         string source,
         CancellationToken cancellationToken
     )
     {
         if (speciesId <= 0) return null;
+        var resolvedSpriteId = spriteId is > 0 ? spriteId.Value : speciesId;
         var path = source switch
         {
-            "home" => $"/sprites/pokemon/home/{(shiny ? "shiny/" : string.Empty)}{speciesId}.png",
-            "artwork" => $"/sprites/pokemon/artwork/{(shiny ? "shiny/" : string.Empty)}{speciesId}.png",
-            "default" => $"/sprites/pokemon/{(shiny ? "shiny/" : string.Empty)}{speciesId}.png",
-            "showdown" => $"/sprites/pokemon/showdown/{(shiny ? "shiny/" : string.Empty)}{speciesId}.gif",
-            "github" => $"/sprites/pokemon/github/{(shiny ? "shiny/" : string.Empty)}{speciesId}.png",
+            "home" => $"/sprites/pokemon/home/{(shiny ? "shiny/" : string.Empty)}{resolvedSpriteId}.png",
+            "artwork" => $"/sprites/pokemon/artwork/{(shiny ? "shiny/" : string.Empty)}{resolvedSpriteId}.png",
+            "default" => $"/sprites/pokemon/{(shiny ? "shiny/" : string.Empty)}{resolvedSpriteId}.png",
+            "showdown" => $"/sprites/pokemon/showdown/{(shiny ? "shiny/" : string.Empty)}{resolvedSpriteId}.gif",
+            "github" => $"/sprites/pokemon/github/{(shiny ? "shiny/" : string.Empty)}{resolvedSpriteId}.png",
             _ => throw new ArgumentException("Unsupported Pokemon sprite source."),
         };
         var file = await DownloadAsync(userId, "pokemon.read", path, _externalSettings.ProviderAssetMaxBytes, cancellationToken);
@@ -216,6 +220,8 @@ public sealed class BeastVaultClient : HouseholdProviderClientBase, IBeastVaultC
         public int Id { get; set; }
         public int SpeciesId { get; set; }
         public string SpeciesName { get; set; } = string.Empty;
+        public string? FormName { get; set; }
+        public int SpriteId { get; set; }
         public string? Nickname { get; set; }
         public int Level { get; set; }
         public bool IsShiny { get; set; }
