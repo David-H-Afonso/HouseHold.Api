@@ -97,6 +97,39 @@ public sealed class CasaOsUpdateService : ICasaOsUpdateService
     )
     {
         var baseUrl = NormalizeBaseUrl(request.InternalBaseUrl);
+        var accessToken = string.IsNullOrEmpty(request.RawToken) ? null : NormalizeRawJwt(request.RawToken);
+        var refreshToken = string.IsNullOrEmpty(request.RawRefreshToken) ? null : NormalizeRawJwt(request.RawRefreshToken);
+        if (refreshToken is not null)
+        {
+            TokenPair? rotated;
+            try
+            {
+                rotated = await RequestTokenPairAsync(baseUrl, refreshToken, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception) when (
+                exception is HttpRequestException or TaskCanceledException or JsonException or ArgumentException)
+            {
+                throw new IntegrationGatewayException(
+                    HttpStatusCode.BadGateway,
+                    "CasaOS could not validate the token pair.",
+                    "casaos_unavailable"
+                );
+            }
+
+            if (rotated is null)
+                throw new IntegrationGatewayException(
+                    HttpStatusCode.Conflict,
+                    "CasaOS rejected the access and refresh token pair. Copy both fresh tokens from the same CasaOS session.",
+                    "casaos_token_pair_invalid"
+                );
+            accessToken = rotated.AccessToken;
+            refreshToken = rotated.RefreshToken;
+        }
+
         var integration = await LoadIntegrationAsync(cancellationToken) ?? new Integration
         {
             Type = IntegrationType.CasaOS,
@@ -110,9 +143,8 @@ public sealed class CasaOsUpdateService : ICasaOsUpdateService
         integration.OpenUrl = null;
         integration.Enabled = true;
 
-        if (!string.IsNullOrEmpty(request.RawToken))
+        if (accessToken is not null)
         {
-            var token = NormalizeRawJwt(request.RawToken);
             var secret = integration.Secrets.SingleOrDefault(item => item.SecretKey == CasaOsUpdatePolicy.TokenSecretKey);
             if (secret is null)
             {
@@ -120,12 +152,11 @@ public sealed class CasaOsUpdateService : ICasaOsUpdateService
                 integration.Secrets.Add(secret);
             }
 
-            secret.ProtectedValue = _tokenProtector.Protect(token);
+            secret.ProtectedValue = _tokenProtector.Protect(accessToken);
         }
 
-        if (!string.IsNullOrEmpty(request.RawRefreshToken))
+        if (refreshToken is not null)
         {
-            var refreshToken = NormalizeRawJwt(request.RawRefreshToken);
             var secret = integration.Secrets.SingleOrDefault(item => item.SecretKey == CasaOsUpdatePolicy.RefreshTokenSecretKey);
             if (secret is null)
             {
@@ -574,27 +605,9 @@ public sealed class CasaOsUpdateService : ICasaOsUpdateService
             if (latest is null || string.IsNullOrWhiteSpace(latest.RawRefreshToken))
                 return false;
 
-            using var request = new HttpRequestMessage(
-                HttpMethod.Post,
-                BuildSameOriginUri(latest.BaseUrl, "v1/user/refresh_token"));
-            request.Content = new StringContent(
-                JsonSerializer.Serialize(new { refresh_token = latest.RawRefreshToken }),
-                Encoding.UTF8,
-                "application/json");
-            using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-            if (!response.IsSuccessStatusCode)
+            var rotated = await RequestTokenPairAsync(latest.BaseUrl, latest.RawRefreshToken, cancellationToken);
+            if (rotated is null)
                 return false;
-
-            var content = await ReadBoundedAsync(response.Content, _maxJsonBytes, "CasaOS refresh response", cancellationToken);
-            using var document = JsonDocument.Parse(content);
-            var payload = document.RootElement.TryGetProperty("data", out var data) ? data : document.RootElement;
-            var accessToken = ReadJsonString(payload, "access_token", "accessToken");
-            var refreshToken = ReadJsonString(payload, "refresh_token", "refreshToken");
-            if (accessToken is null || refreshToken is null)
-                return false;
-
-            accessToken = NormalizeRawJwt(accessToken);
-            refreshToken = NormalizeRawJwt(refreshToken);
             var integration = await LoadIntegrationAsync(cancellationToken);
             if (integration is null)
                 return false;
@@ -604,11 +617,11 @@ public sealed class CasaOsUpdateService : ICasaOsUpdateService
             if (accessSecret is null || refreshSecret is null)
                 return false;
 
-            accessSecret.ProtectedValue = _tokenProtector.Protect(accessToken);
-            refreshSecret.ProtectedValue = _tokenProtector.Protect(refreshToken);
+            accessSecret.ProtectedValue = _tokenProtector.Protect(rotated.AccessToken);
+            refreshSecret.ProtectedValue = _tokenProtector.Protect(rotated.RefreshToken);
             await _db.SaveChangesAsync(cancellationToken);
-            connection.RawToken = accessToken;
-            connection.RawRefreshToken = refreshToken;
+            connection.RawToken = rotated.AccessToken;
+            connection.RawRefreshToken = rotated.RefreshToken;
             return true;
         }
         catch (Exception exception) when (
@@ -621,6 +634,43 @@ public sealed class CasaOsUpdateService : ICasaOsUpdateService
         {
             TokenRefreshLock.Release();
         }
+    }
+
+    private async Task<TokenPair?> RequestTokenPairAsync(
+        string baseUrl,
+        string refreshToken,
+        CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post,
+            BuildSameOriginUri(baseUrl, "v1/users/refresh"));
+        request.Content = new StringContent(
+            JsonSerializer.Serialize(new { refresh_token = refreshToken }),
+            Encoding.UTF8,
+            "application/json");
+        using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            _logger.LogWarning("CasaOS token refresh was rejected with HTTP {StatusCode}", (int)response.StatusCode);
+            return null;
+        }
+
+        var content = await ReadBoundedAsync(response.Content, _maxJsonBytes, "CasaOS refresh response", cancellationToken);
+        using var document = JsonDocument.Parse(content);
+        if (!document.RootElement.TryGetProperty("success", out var success)
+            || !success.TryGetInt32(out var successCode)
+            || successCode != 200)
+            return null;
+        var payload = document.RootElement.TryGetProperty("data", out var data) ? data : document.RootElement;
+        var accessToken = ReadJsonString(payload, "access_token", "accessToken");
+        var nextRefreshToken = ReadJsonString(payload, "refresh_token", "refreshToken");
+        if (accessToken is null || nextRefreshToken is null)
+        {
+            _logger.LogWarning("CasaOS token refresh response did not contain both rotated tokens");
+            return null;
+        }
+
+        return new TokenPair(NormalizeRawJwt(accessToken), NormalizeRawJwt(nextRefreshToken));
     }
 
     private static string? ReadJsonString(JsonElement element, params string[] names)
@@ -1251,6 +1301,8 @@ public sealed class CasaOsUpdateService : ICasaOsUpdateService
         public string RawToken { get; set; } = rawToken;
         public string? RawRefreshToken { get; set; } = rawRefreshToken;
     }
+
+    private sealed record TokenPair(string AccessToken, string RefreshToken);
 
 }
 

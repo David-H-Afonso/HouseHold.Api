@@ -17,6 +17,7 @@ namespace Household.Api.Tests;
 public sealed class CasaOsUpdateServiceTests
 {
     private const string RawToken = "eyJhbGciOiJFUzI1NiJ9.eyJpZCI6MX0.valid-signature";
+    private const string RawRefreshToken = "eyJhbGciOiJFUzI1NiJ9.eyJpc3MiOiJyZWZyZXNoIn0.initial-refresh";
     private static readonly byte[] HouseholdYaml = Encoding.UTF8.GetBytes(
         "name: household\nservices:\n  api:\n    image: ghcr.io/example/household-api:latest\n    environment:\n      PRIVATE_VALUE: server-secret\n"
     );
@@ -48,6 +49,75 @@ public sealed class CasaOsUpdateServiceTests
         var genericIntegrations = new IntegrationService(fixture.Db, new SecretProtector(protection));
         Assert.Empty(await genericIntegrations.GetAllAsync(CancellationToken.None));
         Assert.Null(await genericIntegrations.GetByIdAsync(stored.IntegrationId, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Config_WithRefreshToken_ImmediatelyRotatesAndPersistsLatestPair()
+    {
+        await using var fixture = await UserSettingsServiceTests.TestDb.CreateAsync();
+        var protection = new EphemeralDataProtectionProvider();
+        using var temp = TempDirectory.Create();
+        var refreshCount = 0;
+        var handler = new RecordingHandler(request =>
+        {
+            Assert.Equal(HttpMethod.Post, request.Method);
+            Assert.Equal("/root/v1/users/refresh", request.RequestUri?.PathAndQuery);
+            refreshCount++;
+            return JsonResponse($"{{\"success\":200,\"message\":\"ok\",\"data\":{{\"access_token\":\"header.access-{refreshCount}.signature\",\"refresh_token\":\"header.refresh-{refreshCount}.signature\",\"expires_at\":4102444800}}}}");
+        });
+        var service = CreateService(fixture, handler, protection, temp.Path);
+
+        var result = await service.UpdateConfigAsync(
+            new UpdateCasaOsUpdateConfigRequest(
+                "http://casaos-host.lan:81/root",
+                RawToken,
+                RawRefreshToken
+            ),
+            CancellationToken.None
+        );
+        var refreshedAgain = await service.RefreshTokenAsync(CancellationToken.None);
+
+        Assert.True(result.Configured);
+        Assert.True(result.HasRefreshToken);
+        Assert.True(refreshedAgain);
+        Assert.Equal(2, refreshCount);
+        Assert.Contains(RawRefreshToken, Encoding.UTF8.GetString(handler.Requests[0].Body!));
+        Assert.Contains("header.refresh-1.signature", Encoding.UTF8.GetString(handler.Requests[1].Body!));
+
+        var protector = protection.CreateProtector("Household.CasaOS.RawJwt.v1");
+        var secrets = fixture.Db.IntegrationSecrets.ToDictionary(item => item.SecretKey, item => item.ProtectedValue);
+        Assert.Equal("header.access-2.signature", protector.Unprotect(secrets[CasaOsUpdatePolicy.TokenSecretKey]));
+        Assert.Equal("header.refresh-2.signature", protector.Unprotect(secrets[CasaOsUpdatePolicy.RefreshTokenSecretKey]));
+    }
+
+    [Fact]
+    public async Task Config_WithRejectedRefreshToken_PreservesExistingConfiguration()
+    {
+        await using var fixture = await UserSettingsServiceTests.TestDb.CreateAsync();
+        var protection = new EphemeralDataProtectionProvider();
+        using var temp = TempDirectory.Create();
+        var handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.Unauthorized)
+        {
+            Content = new StringContent("{\"success\":20006}", Encoding.UTF8, "application/json"),
+        });
+        var service = CreateService(fixture, handler, protection, temp.Path);
+        await service.UpdateConfigAsync(
+            new UpdateCasaOsUpdateConfigRequest("http://original-casaos.lan", RawToken),
+            CancellationToken.None
+        );
+
+        var exception = await Assert.ThrowsAsync<IntegrationGatewayException>(() => service.UpdateConfigAsync(
+            new UpdateCasaOsUpdateConfigRequest(
+                "http://replacement-casaos.lan",
+                "header.replacement.signature",
+                RawRefreshToken
+            ),
+            CancellationToken.None
+        ));
+
+        Assert.Equal("casaos_token_pair_invalid", exception.Code);
+        Assert.Equal("http://original-casaos.lan", fixture.Db.Integrations.Single().BaseUrl);
+        Assert.Single(fixture.Db.IntegrationSecrets);
     }
 
     [Theory]
