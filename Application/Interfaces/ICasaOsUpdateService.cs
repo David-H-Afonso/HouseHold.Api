@@ -9,6 +9,7 @@ public interface ICasaOsUpdateService
         UpdateCasaOsUpdateConfigRequest request,
         CancellationToken cancellationToken
     );
+    Task<bool> RefreshTokenAsync(CancellationToken cancellationToken);
     Task<CasaOsAppCapabilities> GetAppCapabilitiesAsync(CancellationToken cancellationToken);
     Task<CasaOsQueuedOperationDto> QueueUpdateAsync(
         Guid actorUserId,
