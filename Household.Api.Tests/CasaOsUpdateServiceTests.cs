@@ -91,6 +91,30 @@ public sealed class CasaOsUpdateServiceTests
     }
 
     [Fact]
+    public async Task Config_WithRefreshToken_ReplacesAnExistingAccessSecret()
+    {
+        await using var fixture = await UserSettingsServiceTests.TestDb.CreateAsync();
+        var protection = new EphemeralDataProtectionProvider();
+        using var temp = TempDirectory.Create();
+        var handler = new RecordingHandler(_ => JsonResponse(
+            "{\"success\":200,\"message\":\"ok\",\"data\":{\"access_token\":\"header.access.signature\",\"refresh_token\":\"header.refresh.signature\",\"expires_at\":4102444800}}"
+        ));
+        var service = CreateService(fixture, handler, protection, temp.Path);
+
+        await service.UpdateConfigAsync(
+            new UpdateCasaOsUpdateConfigRequest("http://casaos-host.lan:81/root", RawToken),
+            CancellationToken.None
+        );
+        var result = await service.UpdateConfigAsync(
+            new UpdateCasaOsUpdateConfigRequest("http://casaos-host.lan:81/root", RawToken, RawRefreshToken),
+            CancellationToken.None
+        );
+
+        Assert.True(result.HasRefreshToken);
+        Assert.Equal(2, fixture.Db.IntegrationSecrets.Count());
+    }
+
+    [Fact]
     public async Task Config_WithRejectedRefreshToken_PreservesExistingConfiguration()
     {
         await using var fixture = await UserSettingsServiceTests.TestDb.CreateAsync();

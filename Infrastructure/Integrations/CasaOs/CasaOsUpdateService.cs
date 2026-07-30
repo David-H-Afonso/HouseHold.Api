@@ -714,7 +714,7 @@ public sealed class CasaOsUpdateService : ICasaOsUpdateService
             return true;
         }
         catch (Exception exception) when (
-            exception is HttpRequestException or TaskCanceledException or JsonException or CryptographicException or ArgumentException)
+            exception is HttpRequestException or TaskCanceledException or JsonException or CryptographicException or ArgumentException or DbUpdateException)
         {
             _logger.LogWarning("CasaOS token refresh failed ({ErrorType})", exception.GetType().Name);
             return false;
