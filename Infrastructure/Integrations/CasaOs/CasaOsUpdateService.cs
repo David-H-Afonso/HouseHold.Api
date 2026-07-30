@@ -96,6 +96,29 @@ public sealed class CasaOsUpdateService : ICasaOsUpdateService
         CancellationToken cancellationToken
     )
     {
+        var lockTaken = false;
+        if (!string.IsNullOrWhiteSpace(request.RawRefreshToken))
+        {
+            await TokenRefreshLock.WaitAsync(cancellationToken);
+            lockTaken = true;
+        }
+
+        try
+        {
+            return await UpdateConfigCoreAsync(request, cancellationToken);
+        }
+        finally
+        {
+            if (lockTaken)
+                TokenRefreshLock.Release();
+        }
+    }
+
+    private async Task<CasaOsUpdateConfigDto> UpdateConfigCoreAsync(
+        UpdateCasaOsUpdateConfigRequest request,
+        CancellationToken cancellationToken
+    )
+    {
         var baseUrl = NormalizeBaseUrl(request.InternalBaseUrl);
         var accessToken = string.IsNullOrEmpty(request.RawToken) ? null : NormalizeRawJwt(request.RawToken);
         var refreshToken = string.IsNullOrEmpty(request.RawRefreshToken) ? null : NormalizeRawJwt(request.RawRefreshToken);
@@ -130,45 +153,61 @@ public sealed class CasaOsUpdateService : ICasaOsUpdateService
             refreshToken = rotated.RefreshToken;
         }
 
-        var integration = await LoadIntegrationAsync(cancellationToken) ?? new Integration
+        return await PersistConfigAsync(baseUrl, accessToken, refreshToken, cancellationToken);
+    }
+
+    private async Task<CasaOsUpdateConfigDto> PersistConfigAsync(
+        string baseUrl,
+        string? accessToken,
+        string? refreshToken,
+        CancellationToken cancellationToken
+    )
+    {
+        for (var attempt = 0; attempt < 2; attempt++)
         {
-            Type = IntegrationType.CasaOS,
-            Name = CasaOsUpdatePolicy.IntegrationName,
-        };
-
-        if (_db.Entry(integration).State == EntityState.Detached)
-            _db.Integrations.Add(integration);
-
-        integration.BaseUrl = baseUrl;
-        integration.OpenUrl = null;
-        integration.Enabled = true;
-
-        if (accessToken is not null)
-        {
-            var secret = integration.Secrets.SingleOrDefault(item => item.SecretKey == CasaOsUpdatePolicy.TokenSecretKey);
-            if (secret is null)
+            var integration = await LoadIntegrationAsync(cancellationToken) ?? new Integration
             {
-                secret = new IntegrationSecret { SecretKey = CasaOsUpdatePolicy.TokenSecretKey };
-                integration.Secrets.Add(secret);
-            }
+                Type = IntegrationType.CasaOS,
+                Name = CasaOsUpdatePolicy.IntegrationName,
+            };
 
-            secret.ProtectedValue = _tokenProtector.Protect(accessToken);
+            if (_db.Entry(integration).State == EntityState.Detached)
+                _db.Integrations.Add(integration);
+
+            integration.BaseUrl = baseUrl;
+            integration.OpenUrl = null;
+            integration.Enabled = true;
+            SetSecret(integration, CasaOsUpdatePolicy.TokenSecretKey, accessToken);
+            SetSecret(integration, CasaOsUpdatePolicy.RefreshTokenSecretKey, refreshToken);
+
+            try
+            {
+                await _db.SaveChangesAsync(cancellationToken);
+                return ToConfigDto(integration);
+            }
+            catch (DbUpdateConcurrencyException) when (attempt == 0)
+            {
+                _logger.LogWarning("CasaOS integration changed while saving its token pair; retrying with fresh data");
+                _db.ChangeTracker.Clear();
+            }
         }
 
-        if (refreshToken is not null)
-        {
-            var secret = integration.Secrets.SingleOrDefault(item => item.SecretKey == CasaOsUpdatePolicy.RefreshTokenSecretKey);
-            if (secret is null)
-            {
-                secret = new IntegrationSecret { SecretKey = CasaOsUpdatePolicy.RefreshTokenSecretKey };
-                integration.Secrets.Add(secret);
-            }
+        throw new DbUpdateConcurrencyException("CasaOS integration changed while saving its token pair.");
+    }
 
-            secret.ProtectedValue = _tokenProtector.Protect(refreshToken);
+    private void SetSecret(Integration integration, string secretKey, string? value)
+    {
+        if (value is null)
+            return;
+
+        var secret = integration.Secrets.SingleOrDefault(item => item.SecretKey == secretKey);
+        if (secret is null)
+        {
+            secret = new IntegrationSecret { SecretKey = secretKey };
+            integration.Secrets.Add(secret);
         }
 
-        await _db.SaveChangesAsync(cancellationToken);
-        return ToConfigDto(integration);
+        secret.ProtectedValue = _tokenProtector.Protect(value);
     }
 
     public async Task<bool> RefreshTokenAsync(CancellationToken cancellationToken)
