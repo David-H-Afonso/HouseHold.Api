@@ -165,29 +165,48 @@ public sealed class CasaOsUpdateService : ICasaOsUpdateService
     {
         for (var attempt = 0; attempt < 2; attempt++)
         {
-            var integration = await LoadIntegrationAsync(cancellationToken) ?? new Integration
-            {
-                Type = IntegrationType.CasaOS,
-                Name = CasaOsUpdatePolicy.IntegrationName,
-            };
-
-            if (_db.Entry(integration).State == EntityState.Detached)
-                _db.Integrations.Add(integration);
-
-            integration.BaseUrl = baseUrl;
-            integration.OpenUrl = null;
-            integration.Enabled = true;
-            SetSecret(integration, CasaOsUpdatePolicy.TokenSecretKey, accessToken);
-            SetSecret(integration, CasaOsUpdatePolicy.RefreshTokenSecretKey, refreshToken);
-
+            await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
             try
             {
-                await _db.SaveChangesAsync(cancellationToken);
-                return ToConfigDto(integration);
+                _db.ChangeTracker.Clear();
+                var integrationId = await _db.Integrations
+                    .AsNoTracking()
+                    .Where(item => item.Type == IntegrationType.CasaOS && item.Name == CasaOsUpdatePolicy.IntegrationName)
+                    .Select(item => (Guid?)item.Id)
+                    .SingleOrDefaultAsync(cancellationToken);
+
+                if (integrationId is null)
+                {
+                    var integration = new Integration
+                    {
+                        Type = IntegrationType.CasaOS,
+                        Name = CasaOsUpdatePolicy.IntegrationName,
+                        BaseUrl = baseUrl,
+                        Enabled = true,
+                    };
+                    _db.Integrations.Add(integration);
+                    await _db.SaveChangesAsync(cancellationToken);
+                    integrationId = integration.Id;
+                }
+                else
+                {
+                    await _db.Integrations
+                        .Where(item => item.Id == integrationId.Value)
+                        .ExecuteUpdateAsync(setters => setters
+                            .SetProperty(item => item.BaseUrl, baseUrl)
+                            .SetProperty(item => item.OpenUrl, (string?)null)
+                            .SetProperty(item => item.Enabled, true)
+                            .SetProperty(item => item.UpdatedAt, DateTime.UtcNow), cancellationToken);
+                }
+
+                await ReplaceSecretsAsync(integrationId.Value, accessToken, refreshToken, cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+                _db.ChangeTracker.Clear();
+                return ToConfigDto(await LoadIntegrationAsync(cancellationToken));
             }
-            catch (DbUpdateConcurrencyException) when (attempt == 0)
+            catch (DbUpdateException) when (attempt == 0)
             {
-                _logger.LogWarning("CasaOS integration changed while saving its token pair; retrying with fresh data");
+                _logger.LogWarning("CasaOS integration changed while replacing its token pair; retrying with fresh data");
                 _db.ChangeTracker.Clear();
             }
         }
@@ -195,19 +214,35 @@ public sealed class CasaOsUpdateService : ICasaOsUpdateService
         throw new DbUpdateConcurrencyException("CasaOS integration changed while saving its token pair.");
     }
 
-    private void SetSecret(Integration integration, string secretKey, string? value)
+    private async Task ReplaceSecretsAsync(
+        Guid integrationId,
+        string? accessToken,
+        string? refreshToken,
+        CancellationToken cancellationToken
+    )
     {
-        if (value is null)
-            return;
-
-        var secret = integration.Secrets.SingleOrDefault(item => item.SecretKey == secretKey);
-        if (secret is null)
+        var secretsToPersist = new[]
         {
-            secret = new IntegrationSecret { SecretKey = secretKey };
-            integration.Secrets.Add(secret);
+            (Key: CasaOsUpdatePolicy.TokenSecretKey, Value: accessToken),
+            (Key: CasaOsUpdatePolicy.RefreshTokenSecretKey, Value: refreshToken),
+        };
+        foreach (var (key, value) in secretsToPersist)
+        {
+            if (value is null)
+                continue;
+
+            await _db.IntegrationSecrets
+                .Where(secret => secret.IntegrationId == integrationId && secret.SecretKey == key)
+                .ExecuteDeleteAsync(cancellationToken);
+            _db.IntegrationSecrets.Add(new IntegrationSecret
+            {
+                IntegrationId = integrationId,
+                SecretKey = key,
+                ProtectedValue = _tokenProtector.Protect(value),
+            });
         }
 
-        secret.ProtectedValue = _tokenProtector.Protect(value);
+        await _db.SaveChangesAsync(cancellationToken);
     }
 
     public async Task<bool> RefreshTokenAsync(CancellationToken cancellationToken)
@@ -656,9 +691,24 @@ public sealed class CasaOsUpdateService : ICasaOsUpdateService
             if (accessSecret is null || refreshSecret is null)
                 return false;
 
-            accessSecret.ProtectedValue = _tokenProtector.Protect(rotated.AccessToken);
-            refreshSecret.ProtectedValue = _tokenProtector.Protect(rotated.RefreshToken);
-            await _db.SaveChangesAsync(cancellationToken);
+            var integrationId = integration.Id;
+            _db.ChangeTracker.Clear();
+            for (var attempt = 0; attempt < 2; attempt++)
+            {
+                await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
+                try
+                {
+                    await ReplaceSecretsAsync(integrationId, rotated.AccessToken, rotated.RefreshToken, cancellationToken);
+                    await transaction.CommitAsync(cancellationToken);
+                    break;
+                }
+                catch (DbUpdateException) when (attempt == 0)
+                {
+                    _logger.LogWarning("CasaOS token refresh changed while replacing its token pair; retrying");
+                    _db.ChangeTracker.Clear();
+                }
+            }
+
             connection.RawToken = rotated.AccessToken;
             connection.RawRefreshToken = rotated.RefreshToken;
             return true;
