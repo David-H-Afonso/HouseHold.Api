@@ -104,14 +104,15 @@ public class AppLauncherConfigLoader : IAppLauncherConfigLoader
                 Name = "Household",
                 Category = "Core",
                 Description = "Central home dashboard",
+                IconUrl = "/household-mark.svg",
                 OpenUrl = _connection.PublicUrl,
                 InternalUrl = _connection.PublicUrl,
                 HealthCheckUrl = AppendPath(_connection.ApiPublicUrl, "health"),
                 Favorite = true,
             },
-            CreateProvider("doit", "DoIt", "Tasks", "Task planning and routines", _connection.DoItBaseUrl, _connection.DoItOpenUrl, "api/health"),
+            CreateProvider("doit", "DoIt", "Tasks", "Task planning and routines", _connection.DoItBaseUrl, _connection.DoItOpenUrl, healthPath: "api/health", iconPath: "doit-icon.svg"),
             CreateProvider("gamesdatabase", "Games Database", "Games", "Personal game collection", _connection.GamesDatabaseBaseUrl, _connection.GamesDatabaseOpenUrl),
-            CreateProvider("jellywatch", "Jellywatch", "Media", "Watch tracking and ratings", _connection.JellywatchBaseUrl, _connection.JellywatchOpenUrl),
+            CreateProvider("jellywatch", "Jellywatch", "Media", "Watch tracking and ratings", _connection.JellywatchBaseUrl, _connection.JellywatchOpenUrl, iconPath: "logo.png"),
             CreateProvider("beastvault", "Beast Vault", "Collections", "Pokemon collection manager", _connection.BeastVaultBaseUrl, _connection.BeastVaultOpenUrl),
             CreateProvider("warcraftarchive", "Warcraft Archive", "Collections", "World of Warcraft progress tracker", _connection.WarcraftArchiveBaseUrl, _connection.WarcraftArchiveOpenUrl),
         ];
@@ -126,7 +127,7 @@ public class AppLauncherConfigLoader : IAppLauncherConfigLoader
         Name = configured.Name,
         Category = string.IsNullOrWhiteSpace(configured.Category) ? canonical.Category : configured.Category,
         Description = configured.Description ?? canonical.Description,
-        IconUrl = configured.IconUrl ?? canonical.IconUrl,
+        IconUrl = canonical.IconUrl ?? configured.IconUrl,
         InternalUrl = configured.InternalUrl ?? canonical.InternalUrl,
         OpenUrl = canonical.OpenUrl,
         Favorite = configured.Favorite,
@@ -143,13 +144,15 @@ public class AppLauncherConfigLoader : IAppLauncherConfigLoader
         string description,
         string? apiUrl,
         string? openUrl,
-        string healthPath = "health"
+        string healthPath = "health",
+        string iconPath = "favicon.ico"
     ) => new()
     {
         Id = id,
         Name = name,
         Category = category,
         Description = description,
+        IconUrl = AppendPath(openUrl, iconPath),
         InternalUrl = openUrl,
         OpenUrl = openUrl,
         HealthCheckUrl = AppendPath(apiUrl, healthPath),

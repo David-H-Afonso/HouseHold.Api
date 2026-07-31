@@ -363,36 +363,34 @@ public class GamesDatabaseClient : HouseholdProviderClientBase, IGamesDatabaseCl
     {
         if (string.IsNullOrWhiteSpace(path))
             return null;
+        var candidate = path.Trim();
+        if (candidate.Length > 2048 || candidate.Contains('\\') || candidate.Contains('#') || candidate.Any(char.IsControl))
+            return null;
         if (
-            Uri.TryCreate(path, UriKind.Absolute, out var absolute)
+            Uri.TryCreate(candidate, UriKind.Absolute, out var absolute)
             && absolute.Scheme is ("http" or "https")
         )
-            return string.IsNullOrEmpty(absolute.UserInfo) ? absolute.PathAndQuery : null;
-        return path[0] == '/' && !path.StartsWith("//", StringComparison.Ordinal) && !path.Contains('\\') && !path.Any(char.IsControl) ? path : null;
+        {
+            if (!string.IsNullOrEmpty(absolute.UserInfo)) return null;
+            candidate = absolute.PathAndQuery;
+        }
+
+        if (candidate[0] != '/' || candidate.StartsWith("//", StringComparison.Ordinal)) return null;
+        var queryIndex = candidate.IndexOf('?');
+        var pathOnly = queryIndex >= 0 ? candidate[..queryIndex] : candidate;
+        if (!pathOnly.StartsWith("/game-images/", StringComparison.OrdinalIgnoreCase)) return null;
+
+        var decodedPath = Uri.UnescapeDataString(pathOnly);
+        if (decodedPath.Contains('\\')
+            || decodedPath.Any(char.IsControl)
+            || decodedPath.Split('/', StringSplitOptions.RemoveEmptyEntries).Any(segment => segment is "." or ".."))
+            return null;
+        return candidate;
     }
 
     private string? BuildAssetUrl(int id, string kind, string? path)
     {
-        if (string.IsNullOrWhiteSpace(path)) return null;
-        if (
-            Uri.TryCreate(path, UriKind.Absolute, out var absolute)
-            && absolute.Scheme is ("http" or "https")
-        )
-        {
-            var configured = NormalizePublicBaseUrl();
-            if (!Uri.TryCreate(configured, UriKind.Absolute, out var configuredUri)
-                || !string.Equals(absolute.Scheme, configuredUri.Scheme, StringComparison.OrdinalIgnoreCase)
-                || !string.Equals(absolute.Host, configuredUri.Host, StringComparison.OrdinalIgnoreCase)
-                || absolute.Port != configuredUri.Port
-                || !string.IsNullOrEmpty(absolute.UserInfo))
-                return null;
-        }
-        else if (BuildProviderPath(path) is null)
-        {
-            return null;
-        }
-
-        return $"/modules/games/assets/{id}/{kind}";
+        return BuildProviderPath(path) is null ? null : $"/modules/games/assets/{id}/{kind}";
     }
 
     private string? NormalizePublicBaseUrl()

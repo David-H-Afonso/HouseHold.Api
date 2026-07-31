@@ -50,6 +50,46 @@ public class GamesDatabaseClientTests
     }
 
     [Fact]
+    public async Task LegacyOriginAssetUrl_UsesTheAuthenticatedHouseholdProxy()
+    {
+        var handler = new RecordingHandler(request => request.RequestUri?.AbsolutePath switch
+        {
+            "/api/games/7" => JsonResponse("""{"id":7,"statusId":2,"name":"Test Game","cover":"http://192.168.0.32:8082/game-images/1/Games/Test_Game/cover.jpg"}"""),
+            "/game-images/1/Games/Test_Game/cover.jpg" => ImageResponse([1, 2, 3]),
+            _ => new HttpResponseMessage(HttpStatusCode.NotFound),
+        });
+        var client = CreateClient(handler, new StubAccessService("gdi-token"), "https://gamesdatabase.example");
+
+        var asset = await client.GetAssetAsync(Guid.NewGuid(), 7, "cover", CancellationToken.None);
+
+        Assert.NotNull(asset);
+        Assert.Equal([1, 2, 3], asset.Value.Content);
+        Assert.Equal("image/webp", asset.Value.ContentType);
+        Assert.Collection(
+            handler.Requests,
+            request => Assert.Equal("/api/games/7", request.RequestUri?.AbsolutePath),
+            request =>
+            {
+                Assert.Equal("games-api.example", request.RequestUri?.Host);
+                Assert.Equal("/game-images/1/Games/Test_Game/cover.jpg", request.RequestUri?.AbsolutePath);
+            }
+        );
+    }
+
+    [Fact]
+    public async Task LegacyOriginAssetUrl_IsExposedOnlyAsTheHouseholdProxy()
+    {
+        var handler = new RecordingHandler(_ => JsonResponse("""
+            {"data":[{"id":7,"statusId":2,"name":"Test Game","cover":"http://192.168.0.32:8082/game-images/1/Games/Test_Game/cover.jpg"}],"totalCount":1,"page":1,"pageSize":24,"totalPages":1}
+            """));
+        var client = CreateClient(handler, new StubAccessService("gdi-token"), "https://gamesdatabase.example");
+
+        var result = await client.GetGamesAsync(Guid.NewGuid(), null, null, 1, 24, CancellationToken.None);
+
+        Assert.Equal("/modules/games/assets/7/cover", Assert.Single(result.Items).Cover);
+    }
+
+    [Fact]
     public async Task UpdateStatus_UsesNarrowPatchEndpointWithoutASecondRequest()
     {
         var handler = new RecordingHandler(
@@ -238,6 +278,13 @@ public class GamesDatabaseClientTests
 
     private static HttpResponseMessage JsonResponse(string json) =>
         new(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
+
+    private static HttpResponseMessage ImageResponse(byte[] content)
+    {
+        var response = new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(content) };
+        response.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/webp");
+        return response;
+    }
 
     private sealed class StubAccessService(params string[] tokens) : IHouseholdProviderAccessService
     {

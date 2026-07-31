@@ -234,12 +234,16 @@ public class AppCatalogService : IAppCatalogService
     private static string? NormalizeOptional(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
-    private static string? NormalizeBrowserUrl(string? value, bool allowRelative)
+    internal static string? NormalizeBrowserUrl(string? value, bool allowRelative)
     {
         var candidate = NormalizeOptional(value);
         if (candidate is null) return null;
-        if (allowRelative && Uri.TryCreate(candidate, UriKind.Relative, out _) && candidate.StartsWith('/'))
-            return candidate.StartsWith("//", StringComparison.Ordinal) ? null : candidate;
+        if (allowRelative && candidate[0] == '/')
+            return !candidate.StartsWith("//", StringComparison.Ordinal)
+                && !candidate.Contains('\\')
+                && !candidate.Any(char.IsControl)
+                    ? candidate
+                    : null;
         return Uri.TryCreate(candidate, UriKind.Absolute, out var uri)
             && uri.Scheme is "http" or "https"
             && string.IsNullOrEmpty(uri.UserInfo)

@@ -29,6 +29,7 @@ public sealed class AppLauncherConfigLoaderTests
                 "id": "gamesdatabase",
                 "name": "Games Database",
                 "category": "Games",
+                "iconUrl": "/icons/gamesdatabase.svg",
                 "openUrl": "https://stale-games.example"
               },
               {
@@ -66,6 +67,10 @@ public sealed class AppLauncherConfigLoaderTests
             Assert.Equal("https://games.example", items.Single(item => item.Id == "gamesdatabase").OpenUrl);
             Assert.Equal("https://doit.example", items.Single(item => item.Id == "doit").OpenUrl);
             Assert.Equal("https://jellyfin.example", items.Single(item => item.Id == "jellyfin").OpenUrl);
+            Assert.Equal("https://games.example/favicon.ico", items.Single(item => item.Id == "gamesdatabase").IconUrl);
+            Assert.Equal("https://doit.example/doit-icon.svg", items.Single(item => item.Id == "doit").IconUrl);
+            Assert.Equal("https://jellywatch.example/logo.png", items.Single(item => item.Id == "jellywatch").IconUrl);
+            Assert.Equal("/household-mark.svg", household.IconUrl);
         }
         finally
         {
