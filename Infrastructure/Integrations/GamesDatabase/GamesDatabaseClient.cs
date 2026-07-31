@@ -363,16 +363,21 @@ public class GamesDatabaseClient : HouseholdProviderClientBase, IGamesDatabaseCl
     {
         if (string.IsNullOrWhiteSpace(path))
             return null;
-        if (Uri.TryCreate(path, UriKind.Absolute, out var absolute))
-            return absolute.Scheme is ("http" or "https") && string.IsNullOrEmpty(absolute.UserInfo)
-                ? absolute.PathAndQuery : null;
+        if (
+            Uri.TryCreate(path, UriKind.Absolute, out var absolute)
+            && absolute.Scheme is ("http" or "https")
+        )
+            return string.IsNullOrEmpty(absolute.UserInfo) ? absolute.PathAndQuery : null;
         return path[0] == '/' && !path.StartsWith("//", StringComparison.Ordinal) && !path.Contains('\\') && !path.Any(char.IsControl) ? path : null;
     }
 
     private string? BuildAssetUrl(int id, string kind, string? path)
     {
         if (string.IsNullOrWhiteSpace(path)) return null;
-        if (Uri.TryCreate(path, UriKind.Absolute, out var absolute))
+        if (
+            Uri.TryCreate(path, UriKind.Absolute, out var absolute)
+            && absolute.Scheme is ("http" or "https")
+        )
         {
             var configured = NormalizePublicBaseUrl();
             if (!Uri.TryCreate(configured, UriKind.Absolute, out var configuredUri)

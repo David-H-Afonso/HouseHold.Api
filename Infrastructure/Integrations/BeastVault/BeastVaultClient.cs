@@ -182,7 +182,10 @@ public sealed class BeastVaultClient : HouseholdProviderClientBase, IBeastVaultC
         if (string.IsNullOrWhiteSpace(imagePath)) return null;
         var candidate = imagePath.Trim();
         if (candidate.Length > 2048 || candidate.Any(char.IsControl)) return null;
-        if (Uri.TryCreate(candidate, UriKind.Absolute, out var absolute))
+        if (
+            Uri.TryCreate(candidate, UriKind.Absolute, out var absolute)
+            && absolute.Scheme is ("http" or "https")
+        )
         {
             if (absolute.Scheme != Uri.UriSchemeHttps || string.IsNullOrWhiteSpace(absolute.Host) || !string.IsNullOrEmpty(absolute.UserInfo))
                 return null;

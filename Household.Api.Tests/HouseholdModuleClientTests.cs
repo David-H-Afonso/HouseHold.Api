@@ -164,9 +164,28 @@ public class HouseholdModuleClientTests
         Assert.Equal("https://assets.example/team.png", Assert.Single(Assert.Single(result.Items).Tags).ImageUrl);
     }
 
+    [Fact]
+    public async Task BeastVaultSearch_ProxiesRootRelativeTagImage()
+    {
+        var handler = new RecordingHandler(_ => JsonResponse("""
+            {"items":[{"id":25,"speciesId":25,"speciesName":"Pikachu","level":20,"tags":[{"id":3,"name":"Team","imagePath":"/tags/images/team.png"}]}],"total":1}
+            """));
+        var client = new BeastVaultClient(
+            new HttpClient(handler),
+            new StubAccessService("beast-token"),
+            Options.Create(new HouseholdConnectionSettings { BeastVaultOpenUrl = "https://bv.example" }),
+            Options.Create(new ExternalIntegrationSettings())
+        );
+
+        var result = await client.GetPokemonAsync(Guid.NewGuid(), null, [], "home", 0, 24, CancellationToken.None);
+
+        Assert.Equal("/modules/pokemon/tags/images/team.png", Assert.Single(Assert.Single(result.Items).Tags).ImageUrl);
+    }
+
     [Theory]
     [InlineData("http://assets.example/team.png")]
     [InlineData("https://user:password@assets.example/team.png")]
+    [InlineData("file:///tags/images/team.png")]
     [InlineData("javascript:alert(1)")]
     public async Task BeastVaultSearch_RejectsUnsafeAbsoluteTagUrl(string imagePath)
     {

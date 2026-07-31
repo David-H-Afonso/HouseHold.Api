@@ -304,10 +304,12 @@ public abstract class HouseholdProviderClientBase
         // Provider-returned absolute URLs are not trusted. Keeping links on the
         // configured public origin prevents a compromised provider from turning
         // Household DTOs into arbitrary external links.
-        if (Uri.TryCreate(path, UriKind.Absolute, out var suppliedUri))
+        if (
+            Uri.TryCreate(path, UriKind.Absolute, out var suppliedUri)
+            && suppliedUri.Scheme is ("http" or "https")
+        )
         {
-            return suppliedUri.Scheme is ("http" or "https")
-                && string.IsNullOrEmpty(suppliedUri.UserInfo)
+            return string.IsNullOrEmpty(suppliedUri.UserInfo)
                 && string.Equals(baseUri.Scheme, suppliedUri.Scheme, StringComparison.OrdinalIgnoreCase)
                 && string.Equals(baseUri.Host, suppliedUri.Host, StringComparison.OrdinalIgnoreCase)
                 && baseUri.Port == suppliedUri.Port
