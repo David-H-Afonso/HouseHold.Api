@@ -30,6 +30,8 @@ public sealed class GitHubActionsMonitorTests
         Assert.Equal("API security", run.WorkflowName);
         Assert.Equal("completed", run.Status);
         Assert.Equal("success", run.Conclusion);
+        Assert.Equal(new DateTime(2026, 7, 24, 10, 0, 0, DateTimeKind.Utc), run.StartedAt);
+        Assert.Equal(new DateTime(2026, 7, 24, 10, 1, 35, DateTimeKind.Utc), run.CompletedAt);
         Assert.Equal(95, run.DurationSeconds);
         Assert.False(run.Degraded);
     }

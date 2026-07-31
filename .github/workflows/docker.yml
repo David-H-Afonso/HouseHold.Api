@@ -4,6 +4,8 @@ on:
     push:
         branches: [main, master]
         tags: ["v*"]
+    pull_request:
+        branches: [main, master]
     workflow_dispatch:
 
 env:
@@ -11,8 +13,34 @@ env:
     IMAGE_NAME: household-api
 
 jobs:
+    validate:
+        name: Validate API
+        runs-on: ubuntu-latest
+        permissions:
+            contents: read
+
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+
+            - name: Set up .NET
+              uses: actions/setup-dotnet@v4
+              with:
+                  dotnet-version: 9.0.x
+
+            - name: Restore
+              run: dotnet restore Household.Api.sln
+
+            - name: Build
+              run: dotnet build Household.Api.sln --configuration Release --no-restore
+
+            - name: Test
+              run: dotnet test Household.Api.sln --configuration Release --no-build
+
     build-and-push:
         name: Build and push Docker image
+        if: github.event_name != 'pull_request'
+        needs: validate
         runs-on: ubuntu-latest
         permissions:
             contents: read

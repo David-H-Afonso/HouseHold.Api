@@ -124,7 +124,8 @@ public sealed class JellyfinService : IJellyfinService
             continueDtos,
             nextDtos,
             fallback ? nextDtos : continueDtos,
-            fallback
+            fallback,
+            config.PublicUrl
         );
     }
 

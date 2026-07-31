@@ -1,4 +1,5 @@
 using Household.Api.Application.Interfaces;
+using Household.Api.Application.Services;
 using Household.Api.Configuration;
 using Household.Api.DTOs;
 using Microsoft.Extensions.Options;
@@ -103,11 +104,11 @@ public sealed class BeastVaultClient : HouseholdProviderClientBase, IBeastVaultC
         var resolvedSpriteId = spriteId is > 0 ? spriteId.Value : speciesId;
         var path = source switch
         {
-            "home" => $"/sprites/pokemon/home/{(shiny ? "shiny/" : string.Empty)}{resolvedSpriteId}.png",
-            "artwork" => $"/sprites/pokemon/artwork/{(shiny ? "shiny/" : string.Empty)}{resolvedSpriteId}.png",
-            "default" => $"/sprites/pokemon/{(shiny ? "shiny/" : string.Empty)}{resolvedSpriteId}.png",
-            "showdown" => $"/sprites/pokemon/showdown/{(shiny ? "shiny/" : string.Empty)}{resolvedSpriteId}.gif",
-            "github" => $"/sprites/pokemon/github/{(shiny ? "shiny/" : string.Empty)}{resolvedSpriteId}.png",
+            PokemonSpriteSources.Home => $"/sprites/pokemon/home/{(shiny ? "shiny/" : string.Empty)}{resolvedSpriteId}.png",
+            PokemonSpriteSources.Artwork => $"/sprites/pokemon/artwork/{(shiny ? "shiny/" : string.Empty)}{resolvedSpriteId}.png",
+            PokemonSpriteSources.Default => $"/sprites/pokemon/{(shiny ? "shiny/" : string.Empty)}{resolvedSpriteId}.png",
+            PokemonSpriteSources.Showdown => $"/sprites/pokemon/showdown/{(shiny ? "shiny/" : string.Empty)}{resolvedSpriteId}.gif",
+            PokemonSpriteSources.GitHub => $"/sprites/pokemon/github/{(shiny ? "shiny/" : string.Empty)}{resolvedSpriteId}.png",
             _ => throw new ArgumentException("Unsupported Pokemon sprite source."),
         };
         var file = await DownloadAsync(userId, "pokemon.read", path, _externalSettings.ProviderAssetMaxBytes, cancellationToken);

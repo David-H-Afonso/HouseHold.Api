@@ -21,16 +21,19 @@ public class GamesDatabaseClient : HouseholdProviderClientBase, IGamesDatabaseCl
 
     private readonly HttpClient _httpClient;
     private readonly GamesDatabaseSettings _settings;
+    private readonly HouseholdConnectionSettings _connectionSettings;
     private readonly IHouseholdProviderAccessService _connectionAccess;
 
     public GamesDatabaseClient(
         HttpClient httpClient,
         IOptions<GamesDatabaseSettings> settings,
+        IOptions<HouseholdConnectionSettings> connectionSettings,
         IHouseholdProviderAccessService connectionAccess
     ) : base(httpClient, connectionAccess, "games-database", "Games Database")
     {
         _httpClient = httpClient;
         _settings = settings.Value;
+        _connectionSettings = connectionSettings.Value;
         _connectionAccess = connectionAccess;
         _httpClient.Timeout = TimeSpan.FromSeconds(Math.Clamp(_settings.TimeoutSeconds, 3, 60));
     }
@@ -389,7 +392,7 @@ public class GamesDatabaseClient : HouseholdProviderClientBase, IGamesDatabaseCl
 
     private string? NormalizePublicBaseUrl()
     {
-        var candidate = _settings.OpenUrl?.Trim().TrimEnd('/');
+        var candidate = _connectionSettings.GamesDatabaseOpenUrl?.Trim().TrimEnd('/');
         return Uri.TryCreate(candidate, UriKind.Absolute, out var uri)
             && uri.Scheme is "http" or "https"
             && string.IsNullOrEmpty(uri.UserInfo)

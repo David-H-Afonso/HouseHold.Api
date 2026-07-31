@@ -64,6 +64,8 @@ public sealed class UserSettingsServiceTests
             new UpdateUserPreferencesRequest(1, "Mars/Olympus", null, null, null, null, null), CancellationToken.None));
         await Assert.ThrowsAsync<ArgumentException>(() => service.UpdatePreferencesAsync(user.Id,
             new UpdateUserPreferencesRequest(1, null, null, null, null, ["other/repository"], null), CancellationToken.None));
+        await Assert.ThrowsAsync<ArgumentException>(() => service.UpdatePreferencesAsync(user.Id,
+            new UpdateUserPreferencesRequest(1, null, null, "HOME", null, null, null), CancellationToken.None));
     }
 
     [Fact]

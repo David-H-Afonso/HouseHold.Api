@@ -13,10 +13,6 @@ public sealed class UserSettingsService(AppDbContext db) : IUserSettingsService
 {
     public const int CurrentSchemaVersion = 1;
     private static readonly HashSet<string> VisualPreferences = new(StringComparer.Ordinal) { "system", "light", "dark" };
-    private static readonly HashSet<string> SpriteSources = new(StringComparer.Ordinal)
-    {
-        "home", "artwork", "default", "showdown", "github",
-    };
     private static readonly IReadOnlyList<DashboardWidgetCatalogItemDto> Catalog =
     [
         new("apps", "Applications", "small", ["small", "medium", "large"], true),
@@ -56,7 +52,7 @@ public sealed class UserSettingsService(AppDbContext db) : IUserSettingsService
         }
         if (request.PokemonSpriteSource is not null)
         {
-            if (!SpriteSources.Contains(request.PokemonSpriteSource))
+            if (!PokemonSpriteSources.IsAllowed(request.PokemonSpriteSource))
                 throw new ArgumentException("Unsupported Pokemon sprite source.");
             preference.PokemonSpriteSource = request.PokemonSpriteSource;
         }

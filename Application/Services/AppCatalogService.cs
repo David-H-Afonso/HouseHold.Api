@@ -166,7 +166,7 @@ public class AppCatalogService : IAppCatalogService
             NormalizeCategory(item.Category),
             NormalizeOptional(item.Description),
             NormalizeBrowserUrl(item.IconUrl, allowRelative: true),
-            NormalizeBrowserUrl(item.OpenUrl, allowRelative: false) ?? NormalizeBrowserUrl(item.ExternalUrl, allowRelative: false),
+            NormalizeBrowserUrl(item.OpenUrl, allowRelative: false),
             favorite,
             apiStatus == "healthy" && frontStatus == "healthy" ? IntegrationHealthStatus.Healthy : IntegrationHealthStatus.Degraded,
             frontStatus,

@@ -8,6 +8,7 @@ namespace Household.Api.Infrastructure.AppLauncher;
 public class AppLauncherConfigLoader : IAppLauncherConfigLoader
 {
     private const long MaxConfigBytes = 1024 * 1024;
+    private const int MaxConfiguredItems = 20;
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
 
     private readonly AppLauncherSettings _settings;
@@ -28,7 +29,7 @@ public class AppLauncherConfigLoader : IAppLauncherConfigLoader
     public async Task<IReadOnlyList<AppLauncherConfigItem>> LoadAsync(CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(_settings.ConfigPath) || !File.Exists(_settings.ConfigPath))
-            return BuildDefaultItems();
+            return BuildBuiltInItems();
 
         try
         {
@@ -36,7 +37,7 @@ public class AppLauncherConfigLoader : IAppLauncherConfigLoader
             if (file.Length > MaxConfigBytes)
             {
                 _logger.LogWarning("App launcher config exceeds the {MaxBytes} byte limit at {Path}", MaxConfigBytes, _settings.ConfigPath);
-                return [];
+                return BuildBuiltInItems();
             }
             await using var stream = file.OpenRead();
             var items = await JsonSerializer.DeserializeAsync<List<AppLauncherConfigItem>>(
@@ -46,33 +47,57 @@ public class AppLauncherConfigLoader : IAppLauncherConfigLoader
             );
 
             var configuredItems = (items ?? [])
-                .Take(20)
                 .Where(item => !string.IsNullOrWhiteSpace(item.Id) && !string.IsNullOrWhiteSpace(item.Name))
+                .GroupBy(item => item.Id.Trim(), StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .Take(MaxConfiguredItems)
                 .ToList();
+            foreach (var item in configuredItems)
+            {
+                item.Id = item.Id.Trim();
+                item.Name = item.Name.Trim();
+            }
 
-            return configuredItems.Count > 0 ? configuredItems : BuildDefaultItems();
+            return MergeWithBuiltIns(configuredItems);
         }
         catch (JsonException ex)
         {
             _logger.LogWarning(ex, "App launcher config JSON is invalid at {Path}", _settings.ConfigPath);
-            return BuildDefaultItems();
+            return BuildBuiltInItems();
         }
         catch (IOException ex)
         {
             _logger.LogWarning(ex, "App launcher config could not be read at {Path}", _settings.ConfigPath);
-            return BuildDefaultItems();
+            return BuildBuiltInItems();
         }
         catch (UnauthorizedAccessException ex)
         {
             _logger.LogWarning(ex, "App launcher config is not readable at {Path}", _settings.ConfigPath);
-            return BuildDefaultItems();
+            return BuildBuiltInItems();
         }
     }
 
-    private IReadOnlyList<AppLauncherConfigItem> BuildDefaultItems()
+    private IReadOnlyList<AppLauncherConfigItem> MergeWithBuiltIns(
+        IReadOnlyList<AppLauncherConfigItem> configuredItems
+    )
     {
-        var candidates = new[]
-        {
+        var builtIns = BuildBuiltInItems();
+        var configuredById = configuredItems.ToDictionary(item => item.Id, StringComparer.OrdinalIgnoreCase);
+        var builtInIds = builtIns.Select(item => item.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var merged = builtIns
+            .Select(item => configuredById.TryGetValue(item.Id, out var configured)
+                ? MergeBuiltIn(item, configured)
+                : item)
+            .ToList();
+
+        merged.AddRange(configuredItems.Where(item => !builtInIds.Contains(item.Id)));
+        return merged;
+    }
+
+    private IReadOnlyList<AppLauncherConfigItem> BuildBuiltInItems()
+    {
+        return
+        [
             new AppLauncherConfigItem
             {
                 Id = "household",
@@ -89,12 +114,27 @@ public class AppLauncherConfigLoader : IAppLauncherConfigLoader
             CreateProvider("jellywatch", "Jellywatch", "Media", "Watch tracking and ratings", _connection.JellywatchBaseUrl, _connection.JellywatchOpenUrl),
             CreateProvider("beastvault", "Beast Vault", "Collections", "Pokemon collection manager", _connection.BeastVaultBaseUrl, _connection.BeastVaultOpenUrl),
             CreateProvider("warcraftarchive", "Warcraft Archive", "Collections", "World of Warcraft progress tracker", _connection.WarcraftArchiveBaseUrl, _connection.WarcraftArchiveOpenUrl),
-        };
-
-        return candidates
-            .Where(item => !string.IsNullOrWhiteSpace(item.OpenUrl))
-            .ToList();
+        ];
     }
+
+    private static AppLauncherConfigItem MergeBuiltIn(
+        AppLauncherConfigItem canonical,
+        AppLauncherConfigItem configured
+    ) => new()
+    {
+        Id = canonical.Id,
+        Name = configured.Name,
+        Category = string.IsNullOrWhiteSpace(configured.Category) ? canonical.Category : configured.Category,
+        Description = configured.Description ?? canonical.Description,
+        IconUrl = configured.IconUrl ?? canonical.IconUrl,
+        InternalUrl = configured.InternalUrl ?? canonical.InternalUrl,
+        OpenUrl = canonical.OpenUrl,
+        Favorite = configured.Favorite,
+        HealthCheckUrl = configured.HealthCheckUrl ?? canonical.HealthCheckUrl,
+        ContainerNames = configured.ContainerNames ?? canonical.ContainerNames,
+        ComposePath = configured.ComposePath ?? canonical.ComposePath,
+        AdminActionsEnabled = configured.AdminActionsEnabled,
+    };
 
     private static AppLauncherConfigItem CreateProvider(
         string id,
@@ -111,7 +151,6 @@ public class AppLauncherConfigLoader : IAppLauncherConfigLoader
         Category = category,
         Description = description,
         InternalUrl = openUrl,
-        ExternalUrl = openUrl,
         OpenUrl = openUrl,
         HealthCheckUrl = AppendPath(apiUrl, healthPath),
         Favorite = true,

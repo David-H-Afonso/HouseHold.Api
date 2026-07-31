@@ -46,11 +46,12 @@ public class HouseholdModuleClientTests
     [Fact]
     public async Task JellywatchDashboard_RequestsThreeActivitiesAndBuildsPublicLinks()
     {
-        var handler = new RecordingHandler(_ => JsonResponse("""
+        var airDate = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(1);
+        var handler = new RecordingHandler(_ => JsonResponse($$"""
             {
               "profile":{"displayName":"David","totalSeriesWatching":2,"totalSeriesCompleted":3,"totalMoviesSeen":4,"totalEpisodesSeen":5},
               "activity":[{"eventId":7,"mediaItemId":9,"title":"Arcane","mediaType":"series","eventType":"Finished","timestamp":"2026-07-23T12:00:00Z","posterUrl":"/api/asset/9/poster","tmdbRating":8.7}],
-              "upcoming":[{"mediaItemId":9,"seriesId":4,"seriesTitle":"Arcane","seasonNumber":2,"episodeNumber":3,"airDate":"2026-07-24","airTimeUtc":"19:00","batchCount":1,"posterUrl":"/api/asset/9/poster"}]
+              "upcoming":[{"mediaItemId":9,"seriesId":4,"seriesTitle":"Arcane","seasonNumber":2,"episodeNumber":3,"airDate":"{{airDate:yyyy-MM-dd}}","airTimeUtc":"19:00","batchCount":1,"posterUrl":"/api/asset/9/poster"}]
             }
             """));
         var access = new StubAccessService("jelly-token");
@@ -132,7 +133,7 @@ public class HouseholdModuleClientTests
         var result = await client.GetPokemonAsync(Guid.NewGuid(), "pika chu", [3, 8], "home", 0, 24, CancellationToken.None);
 
         var pokemon = Assert.Single(result.Items);
-        Assert.Equal("/modules/pokemon/sprites/25?shiny=false&source=home", pokemon.SpriteUrl);
+        Assert.Equal("/modules/pokemon/sprites/25?spriteId=25&shiny=false&source=home", pokemon.SpriteUrl);
         Assert.Contains("/other/home/25.png", pokemon.FallbackSpriteUrl);
         Assert.Equal("https://bv.example/pokemon/25", pokemon.OpenUrl);
         Assert.Equal(new DateTime(2026, 7, 24, 12, 34, 56, DateTimeKind.Utc), pokemon.AddedAt);

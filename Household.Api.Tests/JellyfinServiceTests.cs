@@ -33,6 +33,7 @@ public sealed class JellyfinServiceTests
         Assert.True(config.HasApiKey);
         Assert.DoesNotContain("server-secret-key", fixture.Db.IntegrationSecrets.Single().ProtectedValue);
         Assert.True(dashboard.UsedNextUpFallback);
+        Assert.Equal("https://jelly.example", dashboard.OpenUrl);
         Assert.Equal(4, dashboard.DashboardItems.Count);
         Assert.All(dashboard.DashboardItems, item =>
         {

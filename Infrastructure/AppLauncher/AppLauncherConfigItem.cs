@@ -8,7 +8,6 @@ public class AppLauncherConfigItem
     public string? Description { get; set; }
     public string? IconUrl { get; set; }
     public string? InternalUrl { get; set; }
-    public string? ExternalUrl { get; set; }
     public string? OpenUrl { get; set; }
     public bool Favorite { get; set; }
     public string? HealthCheckUrl { get; set; }

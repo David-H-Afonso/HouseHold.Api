@@ -68,8 +68,6 @@ ApplyEnvOverride(builder.Configuration, "DockerSettings:DockerHost", "DOCKER_HOS
 ApplyEnvOverride(builder.Configuration, "DockerSettings:ComposeBin", "DOCKER_COMPOSE_BIN");
 ApplyEnvOverrideInt(builder.Configuration, "DockerSettings:CommandTimeoutSeconds", "DOCKER_COMMAND_TIMEOUT_SECONDS");
 ApplyEnvOverrideInt(builder.Configuration, "DockerSettings:LogTailLines", "DOCKER_LOG_TAIL_LINES");
-ApplyEnvOverride(builder.Configuration, "GamesDatabaseSettings:BaseUrl", "GAMESDATABASE_BASE_URL");
-ApplyEnvOverride(builder.Configuration, "GamesDatabaseSettings:OpenUrl", "GAMESDATABASE_OPEN_URL");
 ApplyEnvOverride(builder.Configuration, "HouseholdConnectionSettings:PublicUrl", "HOUSEHOLD_PUBLIC_URL");
 ApplyEnvOverride(builder.Configuration, "HouseholdConnectionSettings:ApiPublicUrl", "HOUSEHOLD_API_PUBLIC_URL");
 ApplyEnvOverride(builder.Configuration, "HouseholdConnectionSettings:ClientId", "HOUSEHOLD_CLIENT_ID");

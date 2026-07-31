@@ -18,7 +18,8 @@ public sealed record JellyfinDashboardDto(
     IReadOnlyList<JellyfinItemDto> ContinueWatching,
     IReadOnlyList<JellyfinItemDto> NextUp,
     IReadOnlyList<JellyfinItemDto> DashboardItems,
-    bool UsedNextUpFallback
+    bool UsedNextUpFallback,
+    string? OpenUrl
 );
 
 public sealed record GitHubActionsConfigDto(bool Configured, bool HasToken);

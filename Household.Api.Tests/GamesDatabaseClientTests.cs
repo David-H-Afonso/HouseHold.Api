@@ -33,6 +33,23 @@ public class GamesDatabaseClientTests
     }
 
     [Fact]
+    public async Task BrowserLinks_UseCanonicalHouseholdConnectionOpenUrl()
+    {
+        var handler = new RecordingHandler(
+            _ => JsonResponse("""{"data":[{"id":7,"statusId":2,"name":"Test Game"}],"totalCount":1,"page":1,"pageSize":24,"totalPages":1}""")
+        );
+        var client = CreateClient(
+            handler,
+            new StubAccessService("gdi-token"),
+            "https://canonical-games.example/"
+        );
+
+        var result = await client.GetGamesAsync(Guid.NewGuid(), null, null, 1, 24, CancellationToken.None);
+
+        Assert.Equal("https://canonical-games.example/#/games/7", Assert.Single(result.Items).OpenUrl);
+    }
+
+    [Fact]
     public async Task UpdateStatus_UsesNarrowPatchEndpointWithoutASecondRequest()
     {
         var handler = new RecordingHandler(
@@ -207,10 +224,15 @@ public class GamesDatabaseClientTests
         Assert.Null(Assert.Single(result.Items).Cover);
     }
 
-    private static GamesDatabaseClient CreateClient(RecordingHandler handler, StubAccessService access) =>
+    private static GamesDatabaseClient CreateClient(
+        RecordingHandler handler,
+        StubAccessService access,
+        string? openUrl = "https://games.example"
+    ) =>
         new(
             new HttpClient(handler),
-            Options.Create(new GamesDatabaseSettings { OpenUrl = "https://games.example", TimeoutSeconds = 15 }),
+            Options.Create(new GamesDatabaseSettings { TimeoutSeconds = 15 }),
+            Options.Create(new HouseholdConnectionSettings { GamesDatabaseOpenUrl = openUrl }),
             access
         );
 
