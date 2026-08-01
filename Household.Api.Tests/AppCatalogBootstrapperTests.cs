@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Household.Api.Application.Interfaces;
 using Household.Api.Application.Services;
 using Household.Api.Infrastructure.AppLauncher;
@@ -10,7 +9,7 @@ namespace Household.Api.Tests;
 public sealed class AppCatalogBootstrapperTests
 {
     [Fact]
-    public async Task FreshDatabase_SeedsFullCatalogAndSafeOperationPolicies()
+    public async Task FreshDatabase_SeedsFullCatalogAndMonitoringPolicies()
     {
         await using var fixture = await UserSettingsServiceTests.TestDb.CreateAsync();
         var bootstrapper = CreateBootstrapper(fixture);
@@ -29,14 +28,7 @@ public sealed class AppCatalogBootstrapperTests
 
         var immich = fixture.Db.AllowedComposeApps.Single(item => item.AppId == "immich");
         Assert.False(immich.AdminActionsEnabled);
-        var immichActions = JsonSerializer.Deserialize<string[]>(immich.AllowedActionsJson!);
-        Assert.NotNull(immichActions);
-        Assert.Equal(["monitor"], immichActions);
-        Assert.False(CasaOsUpdatePolicy.IsAllowedAppId("immich"));
-        Assert.False(CasaOsUpdatePolicy.IsAllowedAppId("casaos"));
-        Assert.Equal(
-            "big-bear-seerr",
-            CasaOsUpdatePolicy.GetProjectName("seerr"));
+        Assert.Null(immich.AllowedActionsJson);
     }
 
     [Fact]

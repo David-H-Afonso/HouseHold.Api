@@ -1,7 +1,6 @@
 using Household.Api.Application.Interfaces;
 using Household.Api.Data;
 using Household.Api.DTOs;
-using Household.Api.Infrastructure.Integrations.CasaOs;
 using Household.Api.Models.Integrations;
 using Microsoft.EntityFrameworkCore;
 
@@ -10,8 +9,7 @@ namespace Household.Api.Application.Services;
 public sealed class AppCatalogService(
     AppDbContext db,
     IContainerStatusService containerStatusService,
-    IHttpClientFactory httpClientFactory,
-    ICasaOsUpdateService casaOsUpdateService) : IAppCatalogService
+    IHttpClientFactory httpClientFactory) : IAppCatalogService
 {
     private static readonly SemaphoreSlim OperationalCallGate = new(4, 4);
 
@@ -45,17 +43,12 @@ public sealed class AppCatalogService(
         var containerStatuses = (await containerStatusService.GetAllAppStatusesAsync(cancellationToken))
             .GroupBy(item => item.AppId, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.First().Containers, StringComparer.OrdinalIgnoreCase);
-        var casaOsCapabilities = await RunBoundedOperationalCallAsync(
-            () => casaOsUpdateService.GetAppCapabilitiesAsync(cancellationToken),
-            cancellationToken);
-
         var tasks = items.Select(async item =>
         {
             policiesById.TryGetValue(item.AppId, out var policy);
             containerStatuses.TryGetValue(item.AppId, out var containers);
             containers ??= [];
             providerStatuses.TryGetValue(item.AppId, out var connectionStatus);
-            casaOsCapabilities.UpdateAvailability.TryGetValue(item.AppId, out var updateAvailable);
             var monitoringEnabled = policy is not null;
             var frontStatus = monitoringEnabled
                 ? await CheckHealthAsync(item.InternalUrl, cancellationToken)
@@ -64,10 +57,6 @@ public sealed class AppCatalogService(
                 ? await CheckHealthAsync(policy!.HealthCheckUrl, cancellationToken)
                 : "not_monitored";
             var containerStatus = ResolveContainerStatus(containers);
-            var canUpdate = isAdmin
-                && casaOsCapabilities.Configured
-                && policy?.AdminActionsEnabled == true
-                && CasaOsUpdatePolicy.IsAllowedAppId(item.AppId);
             var favorite = favorites.TryGetValue(item.AppId, out var overrideValue)
                 ? overrideValue
                 : item.Favorite;
@@ -79,9 +68,7 @@ public sealed class AppCatalogService(
                 apiStatus,
                 connectionStatus ?? "not_applicable",
                 containerStatus,
-                updateAvailable,
-                monitoringEnabled,
-                canUpdate);
+                monitoringEnabled);
         });
 
         var results = await Task.WhenAll(tasks);
@@ -123,10 +110,6 @@ public sealed class AppCatalogService(
         var containers = policy is null
             ? []
             : await containerStatusService.GetAppContainersAsync(item.AppId, cancellationToken);
-        var capabilities = await RunBoundedOperationalCallAsync(
-            () => casaOsUpdateService.GetAppCapabilitiesAsync(cancellationToken),
-            cancellationToken);
-        capabilities.UpdateAvailability.TryGetValue(item.AppId, out var updateAvailable);
         var monitoringEnabled = policy is not null;
         var frontStatus = monitoringEnabled
             ? await CheckHealthAsync(item.InternalUrl, cancellationToken)
@@ -135,10 +118,6 @@ public sealed class AppCatalogService(
             ? await CheckHealthAsync(policy!.HealthCheckUrl, cancellationToken)
             : "not_monitored";
         var containerStatus = ResolveContainerStatus(containers);
-        var canUpdate = isAdmin
-            && capabilities.Configured
-            && policy?.AdminActionsEnabled == true
-            && CasaOsUpdatePolicy.IsAllowedAppId(item.AppId);
         return ToDto(
             item,
             favoriteOverride ?? item.Favorite,
@@ -147,9 +126,7 @@ public sealed class AppCatalogService(
             apiStatus,
             connectionStatus,
             containerStatus,
-            updateAvailable,
-            monitoringEnabled,
-            canUpdate);
+            monitoringEnabled);
     }
 
     public async Task<IReadOnlyList<AppLauncherCategoryDto>> GetCategoriesAsync(
@@ -244,9 +221,7 @@ public sealed class AppCatalogService(
         string apiStatus,
         string userConnectionStatus,
         string containerStatus,
-        bool? updateAvailable,
-        bool monitoringEnabled,
-        bool canUpdate) =>
+        bool monitoringEnabled) =>
         new(
             item.AppId.Trim(),
             item.Name.Trim(),
@@ -263,11 +238,7 @@ public sealed class AppCatalogService(
             containers.FirstOrDefault(container => !string.IsNullOrWhiteSpace(container.Image))?.Image,
             containers.SelectMany(container => container.Ports).Distinct().OrderBy(port => port).ToList(),
             containers.Select(container => container.StartedAt).Where(value => value.HasValue).Max(),
-            updateAvailable,
-            canUpdate,
-            monitoringEnabled,
-            canUpdate,
-            false);
+            monitoringEnabled);
 
     private static AdminAppCatalogItemDto ToAdminDto(AppLauncherItem item, AllowedComposeApp? policy) => new(
         item.AppId,
@@ -279,8 +250,6 @@ public sealed class AppCatalogService(
         item.Favorite,
         item.Enabled,
         policy is not null,
-        policy?.AdminActionsEnabled == true && CasaOsUpdatePolicy.IsAllowedAppId(item.AppId),
-        false,
         item.UpdatedAt);
 
     private async Task<string> CheckHealthAsync(string? url, CancellationToken cancellationToken)
@@ -305,7 +274,7 @@ public sealed class AppCatalogService(
         }
         catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException)
         {
-            return "offline";
+            return "unknown";
         }
     }
 

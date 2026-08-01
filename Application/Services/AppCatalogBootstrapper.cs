@@ -2,7 +2,6 @@ using System.Text.Json;
 using Household.Api.Application.Interfaces;
 using Household.Api.Data;
 using Household.Api.Infrastructure.AppLauncher;
-using Household.Api.Infrastructure.Integrations.CasaOs;
 using Household.Api.Models.Integrations;
 using Microsoft.EntityFrameworkCore;
 
@@ -96,7 +95,7 @@ public sealed class AppCatalogBootstrapper(
                     ExternalUrl = seed.OpenUrl,
                     Favorite = seed.Favorite,
                     Enabled = true,
-                    AdminActionsEnabled = seed.CanUpdate,
+                    AdminActionsEnabled = false,
                 };
                 db.AppLauncherItems.Add(item);
                 existingById[seed.Id] = item;
@@ -162,9 +161,8 @@ public sealed class AppCatalogBootstrapper(
                 existingPolicy.ContainerNamesJson = JsonSerializer.Serialize(seed.ContainerNames);
                 existingPolicy.HealthCheckUrl = seed.HealthCheckUrl;
                 existingPolicy.HealthCheckTimeoutSeconds = 5;
-                existingPolicy.AllowedActionsJson = JsonSerializer.Serialize(
-                    seed.CanUpdate ? new[] { "monitor", "update" } : new[] { "monitor" });
-                existingPolicy.AdminActionsEnabled = seed.CanUpdate;
+                existingPolicy.AllowedActionsJson = null;
+                existingPolicy.AdminActionsEnabled = false;
                 continue;
             }
             var policy = new AllowedComposeApp
@@ -174,10 +172,10 @@ public sealed class AppCatalogBootstrapper(
                 ComposePath = seed.ProjectName!,
                 ProjectName = seed.ProjectName,
                 ContainerNamesJson = JsonSerializer.Serialize(seed.ContainerNames),
-                AllowedActionsJson = JsonSerializer.Serialize(seed.CanUpdate ? new[] { "monitor", "update" } : new[] { "monitor" }),
+                AllowedActionsJson = null,
                 HealthCheckUrl = seed.HealthCheckUrl,
                 HealthCheckTimeoutSeconds = 5,
-                AdminActionsEnabled = seed.CanUpdate,
+                AdminActionsEnabled = false,
             };
             db.AllowedComposeApps.Add(policy);
             policiesById[seed.Id] = policy;
@@ -215,7 +213,7 @@ public sealed class AppCatalogBootstrapper(
         string projectName,
         string[] containers,
         string? healthCheckUrl = null) =>
-        new(id, name, category, description, openUrl, favorite, true, true, projectName, containers, healthCheckUrl ?? openUrl);
+        new(id, name, category, description, openUrl, favorite, true, projectName, containers, healthCheckUrl);
 
     private static CatalogSeed Monitor(
         string id,
@@ -226,7 +224,7 @@ public sealed class AppCatalogBootstrapper(
         bool favorite,
         string projectName,
         string[] containers) =>
-        new(id, name, category, description, openUrl, favorite, true, false, projectName, containers, openUrl);
+        new(id, name, category, description, openUrl, favorite, true, projectName, containers, null);
 
     private static CatalogSeed Link(
         string id,
@@ -235,7 +233,7 @@ public sealed class AppCatalogBootstrapper(
         string description,
         string? openUrl,
         bool favorite) =>
-        new(id, name, category, description, openUrl, favorite, false, false, null, [], null);
+        new(id, name, category, description, openUrl, favorite, false, null, [], null);
 
     private static bool IsPlaceholderUrl(string? value)
     {
@@ -264,7 +262,6 @@ public sealed class AppCatalogBootstrapper(
         string? OpenUrl,
         bool Favorite,
         bool MonitoringEnabled,
-        bool CanUpdate,
         string? ProjectName,
         string[] ContainerNames,
         string? HealthCheckUrl);

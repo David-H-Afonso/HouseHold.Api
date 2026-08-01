@@ -2,12 +2,12 @@
 
 > Updated 2026-07-24 for the remaining backend hardening gaps. Scope is `Household.Api` only. No `.env`, secret value, deployment, or live endpoint was accessed.
 
-> 2026-08-01 follow-up: CasaOS updates now use the official bodyless `PATCH /v2/app_management/compose/{projectName}?force=true`; automated rollback is disabled with `rollback_not_safe`. Seerr now has purpose-protected configuration, admin-approved per-user mappings, mandatory `X-API-User` isolation, permission-aware moderation, and focused tests. The older GET/PUT rollback discussion below is retained only as historical review evidence and no longer describes runtime behavior.
+> 2026-08-01 follow-up: Seerr now has purpose-protected configuration, admin-approved per-user mappings, mandatory `X-API-User` isolation, permission-aware moderation, and focused tests. App catalog administration is metadata-only and app operations are read-only.
 
 ## Project Detection
 
 - API: ASP.NET Core minimal API on .NET 9, EF Core/SQLite, JWT bearer auth, Data Protection, built-in rate limiting.
-- Frontend: not in this repository/scope. Browser contracts are API DTOs only; CasaOS credentials remain server-side.
+- Frontend: not in this repository/scope. Browser contracts are API DTOs only.
 - Tests: xUnit in `Household.Api.Tests`.
 - Deployment: Docker/CasaOS documentation and examples; the API uses a bridged configured CasaOS URL and does not mount the Docker socket.
 
@@ -33,13 +33,6 @@ The remaining high/medium backend gaps in scope are fixed: provider downloads no
 - Successful self-service change clears the flag and retains existing session-version increment/refresh-token revocation behavior.
 - Added service/JWT and real middleware tests for creation, reset, invitation redemption, login response/claim, route blocking, and self-change clearing/session invalidation.
 
-- Added a purpose-protected CasaOS raw-JWT configuration service and dedicated admin endpoints. Responses expose only `configured`/`hasToken`; the generic integration API hides and cannot mutate the reserved record.
-- Added typed no-redirect HTTP client with 5-30 second timeout, 64 KiB-8 MiB YAML bounds, 16 KiB-1 MiB JSON bounds, exact CasaOS paths, raw `Authorization`, and no caller-selected URL/path/command.
-- Added exact-byte GET/backup/PUT update and exact-byte stored-backup rollback with traversal, symlink/reparse-point, and root-confinement defenses.
-- Added actor/app/image metadata audit without YAML, environment values, tokens, internal URLs, or filesystem paths.
-- Added nullable update availability from the documented CasaOS upgradable-app contract and admin-only action availability in launcher DTOs.
-- Added docs, `.env.example`, compose example, and persistence guidance.
-- Added service tests for secrecy, allowlist/confirmation/backup ID validation, redirect refusal, size limits, exact accepted update/audit behavior, rollback, and conservative availability parsing.
 
 ## Findings
 
@@ -50,7 +43,6 @@ The remaining high/medium backend gaps in scope are fixed: provider downloads no
 ### High
 
 - **Admin temporary passwords were not forced to change.** Risk: a disclosed or retained temporary credential had normal user/admin access indefinitely. Fix: persisted flag, issuance semantics, database-backed claim refresh during bearer validation, global route restriction, and session-invalidating self change. Status: **fixed**.
-- **CasaOS privileged compose mutation previously absent.** Risk: an unsafe implementation could become an SSRF/generic proxy, leak a host JWT, permit arbitrary compose IDs, or claim asynchronous success. Fix: dedicated fixed-contract service and endpoints with the controls above. Status: **fixed**.
 
 ### Medium
 
@@ -59,22 +51,14 @@ The remaining high/medium backend gaps in scope are fixed: provider downloads no
 - **Games mutation failures were over-classified as ambiguous.** Risk: definitive 400/403/404 could trigger misleading canonical reconciliation. Fix: reconcile only timeout/transport/5xx/malformed-or-empty success; preserve one 401 refresh. Status: **fixed**.
 - **First-use timezone defaulted to persisted UTC.** Risk: browser-local preference could be overwritten before initialization. Fix: nullable/unset response plus browser patch contract and migration. Status: **fixed**.
 - **Correlation IDs were not validated or propagated.** Fix: 64-character safe alphabet, generated fallback, response/outbound propagation, and secret-free log scope. Status: **fixed**.
-- **CasaOS completion cannot be inferred from HTTP 200.** The upstream response only accepts an asynchronous apply. API status remains `Queued`; operators must verify CasaOS/container/application health. Status: **documented limitation**.
-- **Per-app concurrency lock is process-local.** Current documented deployment is one API instance. Multiple replicas would require a distributed/database lock. Status: **open if multi-replica deployment is planned**.
-- **Rollback is compose-only.** It cannot restore volumes/data, registry images that no longer exist, or external dependencies. Status: **documented limitation**.
-- **Backup directory ownership is deployment-specific.** Code creates Unix directories/files as owner-only where possible and rejects reparse points, but the mounted volume must be private to the API identity. Status: **needs manual confirmation**.
 
 ### Low
 
-- Integration action history records acceptance/failure but does not consume CasaOS message-bus progress events. Status: **open optional enhancement**.
 
 ## Environment Variable Classification
 
 | Variables | Classification | Frontend-safe | Action |
 | --- | --- | --- | --- |
-| `CASAOS_COMPOSE_BACKUP_ROOT`, `CASAOS_UPDATE_TIMEOUT_SECONDS`, `CASAOS_MAX_YAML_BYTES`, `CASAOS_MAX_JSON_BYTES` | backend configuration | No browser need | Set in CasaOS/hosting config; persist/protect backup root. |
-| CasaOS internal base URL | encrypted-config-associated backend setting | No | Admin write-only API; never frontend/Vite config. |
-| CasaOS raw JWT | backend secret | **No** | Purpose-protected database value; rotate through admin endpoint. |
 | `JWT_SECRET_KEY`, `SEED_ADMIN_PASSWORD` | backend secrets | No | Existing deployment secrets. |
 | `VITE_*` values | public browser configuration | Only non-secrets | Never place CasaOS JWT/internal URL in them. |
 
@@ -84,18 +68,7 @@ No environment variables were added or read for the forced-change flow.
 
 | Check | Status | Evidence |
 | --- | --- | --- |
-| Config response/token storage secrecy | added | `CasaOsUpdateServiceTests.Config_IsPurposeProtectedAndResponseDoesNotExposeTokenOrInternalUrl` |
-| Exact fixed allowlist/target URL/project binding | added | `Update_RejectsAnythingOutsideExactAllowlist`; `UpdateConfig_RejectsLoopbackOrUrlComponentsThatCouldBypassConfiguredTarget`; `Update_AcceptsExplicitProjectMarkerWhenCasaOsYamlOmitsName` |
-| Exact confirmation | added | `Update_RejectsMismatchedConfirmationBeforeHttpOrAudit` |
-| Traversal/backup ID rejection | added | `Rollback_RejectsCallerControlledBackupPaths` |
-| Redirect refusal | added | `Update_RefusesRedirectAndDoesNotFollowIt`; production handler is also `AllowAutoRedirect=false`. |
-| YAML size limit | added | `Update_RejectsYamlOverConfiguredLimitBeforePut` |
-| Exact YAML PUT/raw auth/audit/queued result | added | `Update_SendsExactYamlWithRawAuthorizationAndAuditsQueuedAcceptance` |
-| Rollback exact bytes + safety backup | added | `Rollback_PutsSelectedBackupUnchangedAndCreatesSafetyBackup` |
-| Per-app concurrent request rejection | added | `SameAppConcurrentUpdate_IsRejectedBeforeSecondCasaOsRequest` |
-| Availability unknown vs false | added | `UpdateAvailability_UsesOnlyWellFormedCasaOsContractOtherwiseUnknown` |
 | Hosted admin vs normal-user route | existing boundary/code-reviewed | Every route checks `IsAdmin`; no new hosted test framework was added. |
-| Live CasaOS update/rollback | manual/skipped | Mutating live endpoints were explicitly prohibited. |
 | Admin-created user requires change | added | `UserAdministrationServiceTests.DirectCreation_RequiresChangingTheTemporaryPassword` |
 | Admin reset requires change and revokes sessions | added/extended | `UserAdministrationServiceTests.PasswordReset_RevokesRefreshSessionsAndAdvancesSessionVersion` |
 | Invitation password is not temporary | added/extended | `UserAdministrationServiceTests.Invitation_IsHashedSingleUseAndCreatesOnlyOneUser` |
@@ -116,9 +89,9 @@ No environment variables were added or read for the forced-change flow.
 ## Auth And Authorization Matrix
 
 - Unauthenticated: rejected by group `RequireAuthorization`.
-- Authenticated non-admin: explicit backend `IsAdmin` check returns forbidden.
-- Admin: may configure/read safe config metadata and invoke only fixed operations/IDs.
-- User A vs User B: not a per-user resource; operations are intentionally global admin actions and actor ID is audited.
+- Authenticated non-admin: explicit backend `IsAdmin` check returns forbidden for admin configuration.
+- Admin: may configure Seerr metadata and manage approved user mappings.
+- User A vs User B: Seerr requests always use the authenticated user's resolved provider identity.
 - Invalid/expired token: existing JWT lifetime/session-version validation applies.
 - Authenticated user requiring password change: only `/auth/me`, `/auth/change-password`, `/auth/logout`, `/auth/logout-all`, and `/health` continue; app, admin, and provider routes return safe 403 regardless of role.
 
@@ -129,12 +102,10 @@ Admin direct creation and reset now always produce forced-change credentials. In
 ## Rate Limiting Review
 
 - CasaOS config/history: existing admin policy, 30/minute/admin.
-- Update/rollback: additional fixed window of 2 requests per 10 minutes per admin and route app ID, queue disabled.
-- Per-app `SemaphoreSlim` rejects concurrent in-process operations with HTTP 409.
 
 ## CORS, Cookies, CSRF, Headers
 
-Existing bearer-token CORS/security-header behavior is unchanged. No cookie/CSRF surface was added. CasaOS credentials are never returned and authenticated upstream redirects are refused.
+Existing bearer-token CORS/security-header behavior is unchanged. No cookie/CSRF surface was added.
 Safe correlation IDs use only letters, digits, `.`, `_`, and `-`, are capped at 64 characters, and are returned as `X-Correlation-ID`; unsafe/multiple inbound values are replaced. The ID, but no token or secret, is propagated to typed/named outbound HTTP clients.
 
 ## Scripts
@@ -155,19 +126,16 @@ Not applicable; this repository/scope is API-only.
 
 ## Manual Checks Still Required
 
-- Verify the configured LAN/host CasaOS URL is reachable from the bridged Household container and is not a loopback bypass.
 - Frontend must consume `requiresPasswordChange`/`password_change_required`, route the user to password change, and clear local access/refresh credentials after the successful response; server enforcement does not depend on this UI behavior.
-- Verify `/data/compose-backups`, `/data/keys`, and the SQLite database are persistent and private to the API container identity.
-- Rotate/provision a valid raw CasaOS JWT without exposing it to browser configuration or logs.
+- Verify `/data/keys` and the SQLite database are persistent and private to the API container identity.
 - Confirm the GitHub PAT is fine-grained/read-only and repository-limited in GitHub. Household can protect/use the token but cannot enforce PAT permissions.
 - Confirm Jellyfin browser deep links in the deployed public URL; unauthenticated browser sessions may land on Jellyfin sign-in by design.
-- In an owned maintenance window, verify one update and rollback while observing CasaOS/container/application health; Household intentionally does not infer completion.
 - Confirm single-replica deployment or add a distributed lock before scaling the API horizontally.
 
 ## Commands To Run
 
 - `dotnet build Household.Api.sln -c Release` — passed, 0 warnings/errors.
-- `dotnet test Household.Api.sln -c Release --no-build` — passed, 103/103.
+- `dotnet test Household.Api.sln -c Release --no-build` — passed, 133/133.
 - `dotnet ef migrations add AddRequiresPasswordChange --project Household.Api.csproj --startup-project Household.Api.csproj --context AppDbContext --configuration Release --no-build` — passed; generated migration `20260724105945_AddRequiresPasswordChange` with false default.
 - `dotnet ef migrations list --configuration Release --project Household.Api.csproj --startup-project Household.Api.csproj --context AppDbContext --no-connect --no-build` — passed; seven migrations listed, including `20260724105945_AddRequiresPasswordChange` (applied status intentionally not queried).
 - `dotnet ef migrations has-pending-model-changes --configuration Release --project Household.Api.csproj --startup-project Household.Api.csproj --context AppDbContext --no-build` — passed; no pending model changes.
@@ -181,18 +149,16 @@ Frontend work should treat nullable `timeZoneId` as first use and patch the brow
 
 ### Scope And Executive Summary
 
-This follow-up reviewed the current staged, unstaged, and untracked Seerr, database catalog, catalog editor, and CasaOS update work together with `Household.Front`. One **High** CasaOS credential-crossover race was confirmed and fixed. No Critical findings were found, and no High or Medium findings remain open in this scope. The concrete correctness findings identified below were also fixed and covered by the final verification run.
+This follow-up reviewed the Seerr integration, database catalog, catalog editor, and read-only app monitoring together with `Household.Front`. No Critical, High, or Medium findings remain open in this scope.
 
 ### Changes Made
 
-- `Infrastructure/Integrations/CasaOs/CasaOsUpdateService.cs:94-108,620-638,735-741`: serialize every configuration write with token rotation, reload configuration without EF tracking, and refuse a 401 refresh/retry if the integration record or authority changed. This prevents credentials from one CasaOS server replacing or being retried against another server during a concurrent admin reconfiguration.
-- `Household.Api.Tests/CasaOsUpdateServiceTests.cs:167-224`: added a regression test that changes the configured server and protected token pair while an old-host request is in flight, then verifies there is no refresh/retry and the replacement credentials remain intact.
 - Added a canonical resolved Seerr identity with a unique partial index, duplicate checks, race-safe persistence, and lazy backfill for existing mappings. Jellyfin and numeric override mappings can no longer resolve two Household users to the same Seerr account.
 - Serialized Seerr configuration writes, reload configuration inside the lock, require the API key again for any internal URL change, and use a database concurrency token so stale writes fail atomically across contexts or application instances.
 - Jellyfin preference edits now preserve the canonical reservation whenever a numeric Seerr override remains active.
 - Restricted Seerr artwork to fixed TMDB proxy paths, bounded season input and response-body reads, and corrected delete authorization/error mapping.
 - Reworked catalog bootstrap to merge mounted metadata while retaining trusted operational targets, remove case-insensitive duplicates, and replace known policies with canonical values before requests are served.
-- Single-app reads no longer refresh the complete catalog, category reads no longer perform operational probes, and Docker, CasaOS, and health calls share a process-wide concurrency bound.
+- Single-app reads no longer refresh the complete catalog, category reads no longer perform operational probes, and Docker and health calls share a process-wide concurrency bound.
 
 ### Findings
 
@@ -202,7 +168,6 @@ This follow-up reviewed the current staged, unstaged, and untracked Seerr, datab
 
 #### High
 
-- **Fixed — concurrent CasaOS reconfiguration could cross credential/server boundaries.** A request holding the old connection could receive `401`, reload a newly configured token pair, and retry it against the old request URL; tracked EF entities could also overwrite the new server's credentials with a rotation from the old server. The shared lock, no-tracking reload, integration-ID check, and authority check now fail closed. Evidence: `CasaOsUpdateService.cs:94-108,620-638,735-741`; regression test `CasaOsUpdateServiceTests.cs:167-224`.
 - **Fixed — concurrent Seerr reconfiguration could cross credential/server boundaries.** Configuration writes now reload under a process-wide lock, every internal URL change requires the API key again, and `Integration.ConfigurationVersion` provides optimistic concurrency across database contexts and application instances. A stale integration/secret write rolls back and returns `seerr_config_conflict`; the version is also part of every Jellyfin mapping-cache key, so another instance cannot reuse user IDs from the previous Seerr server.
 
 #### Medium
@@ -210,7 +175,7 @@ This follow-up reviewed the current staged, unstaged, and untracked Seerr, datab
 - **Fixed — Seerr mappings were not one-to-one.** `SeerrResolvedUserId` now stores the canonical upstream identity and has a unique partial index. Admin updates reject duplicates across mapping sources, concurrent writes fail closed, and existing approved mappings are backfilled on resolution.
 - **Fixed — Jellyfin preference edits could release an active numeric override reservation.** Clearing or changing Jellyfin metadata now retains `SeerrResolvedUserId` whenever `SeerrUserIdOverride` remains active.
 - **Fixed — Seerr could cause browser requests to arbitrary image hosts.** Artwork now accepts only path-safe TMDB images or already-proxied images on the configured Seerr public authority; all other absolute URLs are dropped.
-- **Fixed — catalog reads could create unbounded operational fan-out.** Single-item and favorite reads fetch only one item, category reads query metadata only, CasaOS and health requests are process-wide concurrency-bounded, and Docker inspection is bounded inside `ContainerStatusService` so direct status routes cannot bypass the limit.
+- **Fixed — catalog reads could create unbounded operational fan-out.** Single-item and favorite reads fetch only one item, category reads query metadata only, health requests are process-wide concurrency-bounded, and Docker inspection is bounded inside `ContainerStatusService` so direct status routes cannot bypass the limit.
 - **Fixed — legacy catalog rows could become unsafe monitoring inputs.** Bootstrap groups IDs case-insensitively, disables duplicate launcher rows, removes duplicate policies, and overwrites every known operational policy with canonical project, container, capability, and health values.
 - **Fixed correctness — mounted overrides for built-in apps were skipped.** Mounted name, category, description, icon, and favorite values are merged into canonical rows while canonical URLs and all operational policy fields remain trusted.
 - **Fixed — Seerr TV season input was unbounded.** Requests now accept at most 100 distinct seasons in the range 0 through 200.
