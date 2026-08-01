@@ -13,6 +13,7 @@ public class IntegrationService : IIntegrationService
         IntegrationType.CasaOS,
         IntegrationType.Jellyfin,
         IntegrationType.GitHubActions,
+        IntegrationType.Seerr,
     ];
 
     private readonly AppDbContext _db;

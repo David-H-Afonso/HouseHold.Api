@@ -80,6 +80,10 @@ ApplyEnvOverrideInt(builder.Configuration, "ExternalIntegrationSettings:GitHubPo
 ApplyEnvOverrideInt(builder.Configuration, "ExternalIntegrationSettings:GitHubConcurrency", "GITHUB_ACTIONS_CONCURRENCY");
 ApplyEnvOverride(builder.Configuration, "ExternalIntegrationSettings:WarcraftStatusPathTemplate", "WARCRAFT_STATUS_PATH_TEMPLATE");
 ApplyEnvOverride(builder.Configuration, "ExternalIntegrationSettings:PokemonDownloadPathTemplate", "POKEMON_DOWNLOAD_PATH_TEMPLATE");
+ApplyEnvOverride(builder.Configuration, "SeerrSettings:BaseUrl", "SEERR_BASE_URL");
+ApplyEnvOverride(builder.Configuration, "SeerrSettings:PublicUrl", "SEERR_OPEN_URL");
+ApplyEnvOverride(builder.Configuration, "SeerrSettings:ApiKey", "SEERR_API_KEY");
+ApplyEnvOverrideInt(builder.Configuration, "SeerrSettings:RequestTimeoutSeconds", "SEERR_TIMEOUT_SECONDS");
 ApplyEnvOverride(builder.Configuration, "CasaOsUpdateSettings:BackupRoot", "CASAOS_COMPOSE_BACKUP_ROOT");
 ApplyEnvOverrideInt(builder.Configuration, "CasaOsUpdateSettings:RequestTimeoutSeconds", "CASAOS_UPDATE_TIMEOUT_SECONDS");
 ApplyEnvOverrideInt(builder.Configuration, "CasaOsUpdateSettings:MaxYamlBytes", "CASAOS_MAX_YAML_BYTES");
@@ -150,6 +154,9 @@ builder.Services.Configure<ExternalIntegrationSettings>(
 );
 builder.Services.Configure<CasaOsUpdateSettings>(
     builder.Configuration.GetSection(CasaOsUpdateSettings.SectionName)
+);
+builder.Services.Configure<SeerrSettings>(
+    builder.Configuration.GetSection(SeerrSettings.SectionName)
 );
 
 // ── Database ──────────────────────────────────────────────────────────────────
@@ -279,6 +286,10 @@ builder.Services.AddRateLimiter(options =>
         context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "unknown", _ => Window(60, TimeSpan.FromMinutes(1))));
     options.AddPolicy("app-read", context => RateLimitPartition.GetFixedWindowLimiter(
         context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "unknown", _ => Window(12, TimeSpan.FromMinutes(1))));
+    options.AddPolicy("seerr-read", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "unknown", _ => Window(90, TimeSpan.FromMinutes(1))));
+    options.AddPolicy("seerr-mutation", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "unknown", _ => Window(20, TimeSpan.FromMinutes(1))));
     options.AddPolicy("asset", context => RateLimitPartition.GetFixedWindowLimiter(
         context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "unknown", _ => Window(240, TimeSpan.FromMinutes(1))));
     options.AddPolicy("download", context => RateLimitPartition.GetFixedWindowLimiter(
@@ -410,6 +421,7 @@ builder.Services.AddScoped<IIntegrationActionLogService, IntegrationActionLogSer
 builder.Services.AddScoped<IUserSettingsService, UserSettingsService>();
 builder.Services.AddScoped<IUserAdministrationService, UserAdministrationService>();
 builder.Services.AddScoped<IAppLauncherConfigLoader, AppLauncherConfigLoader>();
+builder.Services.AddScoped<AppCatalogBootstrapper>();
 builder.Services.AddScoped<IAppCatalogService, AppCatalogService>();
 builder.Services.AddScoped<IDockerClient, DockerClient>();
 builder.Services.AddScoped<IContainerStatusService, ContainerStatusService>();
@@ -427,6 +439,8 @@ builder.Services.AddSingleton<JellyfinImageGrants>();
 builder.Services.AddHttpClient<IJellyfinService, JellyfinService>().ConfigurePrimaryHttpMessageHandler(NoRedirectHandler);
 builder.Services.AddSingleton<GitHubActionsRuntimeCache>();
 builder.Services.AddHttpClient<IGitHubActionsMonitor, GitHubActionsMonitor>().ConfigurePrimaryHttpMessageHandler(NoRedirectHandler);
+builder.Services.AddHttpClient<ISeerrService, Household.Api.Infrastructure.Integrations.Seerr.SeerrService>()
+    .ConfigurePrimaryHttpMessageHandler(NoRedirectHandler);
 builder.Services.AddHostedService<GitHubActionsPollingService>();
 builder.Services.AddSingleton<CasaOsUpdateLocks>();
 builder.Services.AddHttpClient<ICasaOsUpdateService, CasaOsUpdateService>()
@@ -465,6 +479,8 @@ using (var scope = app.Services.CreateScope())
         ?? new();
 
     await SeedAsync(db, seedCfg, scope.ServiceProvider.GetRequiredService<ILogger<Program>>());
+    await scope.ServiceProvider.GetRequiredService<AppCatalogBootstrapper>().EnsureSeededAsync(CancellationToken.None);
+    await scope.ServiceProvider.GetRequiredService<ISeerrService>().EnsureBootstrapConfigAsync(CancellationToken.None);
 }
 
 var adminCommandExitCode = await AdminRecoveryCommand.TryRunAsync(args, app.Services);
@@ -580,6 +596,7 @@ app.MapSettingsEndpoints();
 app.MapJellyfinEndpoints();
 app.MapGitHubActionsEndpoints();
 app.MapCasaOsUpdateEndpoints();
+app.MapSeerrEndpoints();
 
 app.Run();
 

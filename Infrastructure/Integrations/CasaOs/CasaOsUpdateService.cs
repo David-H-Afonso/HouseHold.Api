@@ -96,12 +96,7 @@ public sealed class CasaOsUpdateService : ICasaOsUpdateService
         CancellationToken cancellationToken
     )
     {
-        var lockTaken = false;
-        if (!string.IsNullOrWhiteSpace(request.RawRefreshToken))
-        {
-            await TokenRefreshLock.WaitAsync(cancellationToken);
-            lockTaken = true;
-        }
+        await TokenRefreshLock.WaitAsync(cancellationToken);
 
         try
         {
@@ -109,8 +104,7 @@ public sealed class CasaOsUpdateService : ICasaOsUpdateService
         }
         finally
         {
-            if (lockTaken)
-                TokenRefreshLock.Release();
+            TokenRefreshLock.Release();
         }
     }
 
@@ -120,6 +114,21 @@ public sealed class CasaOsUpdateService : ICasaOsUpdateService
     )
     {
         var baseUrl = NormalizeBaseUrl(request.InternalBaseUrl);
+        var existing = await _db.Integrations.AsNoTracking()
+            .Where(item => item.Type == IntegrationType.CasaOS && item.Name == CasaOsUpdatePolicy.IntegrationName)
+            .Select(item => new
+            {
+                item.BaseUrl,
+                HasAccessToken = item.Secrets.Any(secret => secret.SecretKey == CasaOsUpdatePolicy.TokenSecretKey),
+                HasRefreshToken = item.Secrets.Any(secret => secret.SecretKey == CasaOsUpdatePolicy.RefreshTokenSecretKey),
+            })
+            .SingleOrDefaultAsync(cancellationToken);
+        if (existing?.HasAccessToken == true
+            && !string.IsNullOrWhiteSpace(existing.BaseUrl)
+            && !HasSameAuthority(existing.BaseUrl, baseUrl)
+            && (string.IsNullOrWhiteSpace(request.RawToken)
+                || existing.HasRefreshToken && string.IsNullOrWhiteSpace(request.RawRefreshToken)))
+            throw new ArgumentException("Provide fresh CasaOS credentials when changing servers.");
         var accessToken = string.IsNullOrEmpty(request.RawToken) ? null : NormalizeRawJwt(request.RawToken);
         var refreshToken = string.IsNullOrEmpty(request.RawRefreshToken) ? null : NormalizeRawJwt(request.RawRefreshToken);
         if (refreshToken is not null)
@@ -277,7 +286,7 @@ public sealed class CasaOsUpdateService : ICasaOsUpdateService
                 return new CasaOsAppCapabilities(true, availability);
 
             foreach (var appId in availability.Keys.ToList())
-                availability[appId] = upgradableApps.Contains(appId);
+                availability[appId] = upgradableApps.Contains(CasaOsUpdatePolicy.GetProjectName(appId));
 
             return new CasaOsAppCapabilities(true, availability);
         }
@@ -306,6 +315,7 @@ public sealed class CasaOsUpdateService : ICasaOsUpdateService
     {
         RequireAllowedAppId(appId);
         RequireConfirmation(confirmation, $"UPDATE {appId}");
+        var projectName = CasaOsUpdatePolicy.GetProjectName(appId);
 
         var gate = await AcquireAppLockAsync(appId, cancellationToken);
         try
@@ -321,14 +331,14 @@ public sealed class CasaOsUpdateService : ICasaOsUpdateService
             var accepted = false;
             try
             {
-                var currentYaml = await GetCurrentYamlAsync(connection, appId, cancellationToken);
-                var previousImages = ValidateComposeYaml(currentYaml, appId);
+                var currentYaml = await GetCurrentYamlAsync(connection, projectName, cancellationToken);
+                var previousImages = ValidateComposeYaml(currentYaml, projectName);
                 var backupId = await WriteBackupAsync(appId, currentYaml, cancellationToken);
 
-                actionLog.ResultSummaryJson = SerializeAudit(new { backupId, previousImages });
+                actionLog.ResultSummaryJson = SerializeAudit(new { backupId, projectName, previousImages });
                 await _db.SaveChangesAsync(cancellationToken);
 
-                await PutComposeYamlAsync(connection, appId, currentYaml, cancellationToken);
+                await PatchUpdateAsync(connection, projectName, cancellationToken);
                 accepted = true;
                 actionLog.Status = IntegrationActionStatus.Queued;
                 await _db.SaveChangesAsync(cancellationToken);
@@ -360,7 +370,7 @@ public sealed class CasaOsUpdateService : ICasaOsUpdateService
         }
     }
 
-    public async Task<CasaOsQueuedOperationDto> QueueRollbackAsync(
+    public Task<CasaOsQueuedOperationDto> QueueRollbackAsync(
         Guid actorUserId,
         string appId,
         string confirmation,
@@ -372,68 +382,11 @@ public sealed class CasaOsUpdateService : ICasaOsUpdateService
         RequireConfirmation(confirmation, $"ROLLBACK {appId}");
         if (backupId is not null)
             RequireValidBackupId(backupId);
-
-        var gate = await AcquireAppLockAsync(appId, cancellationToken);
-        try
-        {
-            var connection = await RequireConnectionAsync(cancellationToken);
-            var actionLog = await StartActionAsync(
-                actorUserId,
-                connection.IntegrationId,
-                appId,
-                CasaOsUpdatePolicy.RollbackAction,
-                cancellationToken
-            );
-            var accepted = false;
-            try
-            {
-            var selectedBackupId = backupId ?? FindLatestBackupId(appId);
-            var rollbackYaml = await ReadBackupAsync(appId, selectedBackupId, cancellationToken);
-            ValidateComposeYaml(rollbackYaml, appId);
-                var currentYaml = await GetCurrentYamlAsync(connection, appId, cancellationToken);
-                var previousImages = ValidateComposeYaml(currentYaml, appId);
-                var safetyBackupId = await WriteBackupAsync(appId, currentYaml, cancellationToken);
-
-                actionLog.ResultSummaryJson = SerializeAudit(
-                    new
-                    {
-                        backupId = selectedBackupId,
-                        safetyBackupId,
-                        previousImages,
-                    }
-                );
-                await _db.SaveChangesAsync(cancellationToken);
-
-                await PutComposeYamlAsync(connection, appId, rollbackYaml, cancellationToken);
-                accepted = true;
-                actionLog.Status = IntegrationActionStatus.Queued;
-                await _db.SaveChangesAsync(cancellationToken);
-
-                return ToQueuedDto(actionLog, selectedBackupId, safetyBackupId);
-            }
-            catch (Exception exception) when (!accepted)
-            {
-                await TryMarkFailedAsync(actionLog, GetSafeErrorCode(exception));
-                throw NormalizeOperationException(exception);
-            }
-            catch (Exception)
-            {
-                _logger.LogError(
-                    "CasaOS accepted action {ActionLogId} for {AppId}, but its queued audit status could not be persisted",
-                    actionLog.Id,
-                    appId
-                );
-                throw new IntegrationGatewayException(
-                    HttpStatusCode.BadGateway,
-                    "CasaOS accepted the request, but Household could not persist its final queued status.",
-                    "casaos_acceptance_audit_uncertain"
-                );
-            }
-        }
-        finally
-        {
-            gate.Release();
-        }
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromException<CasaOsQueuedOperationDto>(new IntegrationGatewayException(
+            HttpStatusCode.Conflict,
+            "Automated rollback is unavailable because this update cannot be proven safe.",
+            "rollback_not_safe"));
     }
 
     public async Task<IReadOnlyList<CasaOsActionStatusDto>> GetHistoryAsync(
@@ -530,26 +483,23 @@ public sealed class CasaOsUpdateService : ICasaOsUpdateService
         return await ReadBoundedAsync(response.Content, _maxYamlBytes, "CasaOS YAML response", cancellationToken);
     }
 
-    private async Task PutComposeYamlAsync(
+    private async Task PatchUpdateAsync(
         Connection connection,
-        string appId,
-        byte[] yaml,
+        string projectName,
         CancellationToken cancellationToken
     )
     {
-        var escapedAppId = Uri.EscapeDataString(appId);
+        var escapedProjectName = Uri.EscapeDataString(projectName);
         using var response = await SendAsync(() =>
         {
             var request = CreateRequest(
-                HttpMethod.Put,
+                HttpMethod.Patch,
                 connection,
-                $"v2/app_management/compose/{escapedAppId}?dry_run=false&check_port_conflict=true"
+                $"v2/app_management/compose/{escapedProjectName}?force=true"
             );
-            request.Content = new ByteArrayContent(yaml);
-            request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/yaml");
             return request;
         }, connection, cancellationToken);
-        RequireCasaOsOk(response, "queue compose apply");
+        RequireCasaOsOk(response, "queue app update");
     }
 
     private async Task<HttpResponseMessage> SendAsync(
@@ -625,7 +575,7 @@ public sealed class CasaOsUpdateService : ICasaOsUpdateService
                 "casaos_reconnect_required"
             );
 
-        if (response.StatusCode != HttpStatusCode.OK)
+        if (!response.IsSuccessStatusCode)
             throw new IntegrationGatewayException(
                 HttpStatusCode.BadGateway,
                 $"CasaOS could not {operation}.",
@@ -677,6 +627,9 @@ public sealed class CasaOsUpdateService : ICasaOsUpdateService
         {
             var latest = await GetConnectionAsync(cancellationToken);
             if (latest is null || string.IsNullOrWhiteSpace(latest.RawRefreshToken))
+                return false;
+            if (latest.IntegrationId != connection.IntegrationId
+                || !HasSameAuthority(latest.BaseUrl, connection.BaseUrl))
                 return false;
 
             var rotated = await RequestTokenPairAsync(latest.BaseUrl, latest.RawRefreshToken, cancellationToken);
@@ -781,7 +734,7 @@ public sealed class CasaOsUpdateService : ICasaOsUpdateService
 
     private Task<Integration?> LoadIntegrationAsync(CancellationToken cancellationToken) =>
         _db
-            .Integrations.Include(item => item.Secrets)
+            .Integrations.AsNoTracking().Include(item => item.Secrets)
             .SingleOrDefaultAsync(
                 item => item.Type == IntegrationType.CasaOS && item.Name == CasaOsUpdatePolicy.IntegrationName,
                 cancellationToken
@@ -841,6 +794,16 @@ public sealed class CasaOsUpdateService : ICasaOsUpdateService
             return true;
         return IPAddress.TryParse(uri.Host, out var address)
             && (IPAddress.IsLoopback(address) || address.Equals(IPAddress.Any) || address.Equals(IPAddress.IPv6Any));
+    }
+
+    private static bool HasSameAuthority(string first, string second)
+    {
+        if (!Uri.TryCreate(first, UriKind.Absolute, out var firstUri)
+            || !Uri.TryCreate(second, UriKind.Absolute, out var secondUri))
+            return false;
+        return string.Equals(firstUri.Scheme, secondUri.Scheme, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(firstUri.Host, secondUri.Host, StringComparison.OrdinalIgnoreCase)
+            && firstUri.Port == secondUri.Port;
     }
 
     private static string NormalizeRawJwt(string value)
@@ -1259,7 +1222,7 @@ public sealed class CasaOsUpdateService : ICasaOsUpdateService
                 var appId = idElement.GetString();
                 if (appId is null || appId.Length is 0 or > 120)
                     return false;
-                if (CasaOsUpdatePolicy.IsAllowedAppId(appId))
+                if (appId.All(character => char.IsLetterOrDigit(character) || character is '-' or '_' or '.'))
                     appIds.Add(appId);
             }
             return true;
@@ -1371,7 +1334,8 @@ public sealed class CasaOsUpdateService : ICasaOsUpdateService
             backupId,
             safetyBackupId,
             previousImages,
-            log.ErrorMessage
+            log.ErrorMessage,
+            false
         );
     }
 

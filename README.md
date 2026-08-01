@@ -17,7 +17,9 @@ RESTful API for Household — a personal home management app covering food track
 - **Per-user settings** — Versioned preferences, dashboard layout, provider filters, and app favorites
 - **Admin invitations** — Expiring one-use invites and auditable session-aware user management
 - **Jellyfin/GitHub Actions** — Encrypted server configuration, safe proxies, and a 12-repository workflow cache
-- **CasaOS updates** — Admin-only, allowlisted Compose update/rollback with private persistent backups
+- **Seerr requests** — Per-user discovery, requests, quotas, and permission-aware moderation with encrypted configuration
+- **App catalog** — Database-backed launcher metadata, preferred HTTPS URLs, per-user favorites, and admin editing
+- **CasaOS updates** — Admin-only, individual app-store updates with private recovery backups and conservative rollback policy
 
 ## Tech Stack
 
@@ -175,6 +177,10 @@ invalidates all existing access and refresh sessions.
 | POST | `/api/v1/dashboard/layout/reset` | Restore default layout |
 | GET | `/api/v1/jellyfin/dashboard` | Continue Watching and Next Up |
 | GET | `/api/v1/github-actions` | Cached allowlisted workflow status |
+| GET | `/api/v1/seerr/session` | Current mapped Seerr identity, permissions, and quotas |
+| GET | `/api/v1/seerr/search` | Permission-aware Seerr search |
+| GET/POST | `/api/v1/seerr/requests` | Request history and request creation |
+| GET/PATCH | `/api/v1/admin/apps/catalog/{id?}` | Admin launcher catalog editing |
 
 Jellyfin item links are browser-session deep links. Depending on the Jellyfin deployment and current browser login,
 opening one may show Jellyfin's sign-in page rather than the item; Household never places the Jellyfin API key in
@@ -182,21 +188,21 @@ the link or browser session.
 
 ### CasaOS Update Operations (Admin Only)
 
-Household can replicate CasaOS **Edit -> Update** for exactly `household`, `doit`, `gamesdatabase`, `jellywatch`, `beastvault`, `warcraftarchive`, and `jellyfin`. Configure the bridged/LAN CasaOS base URL and raw CasaOS JWT through `PUT /api/v1/admin/casaos/config`; both are server-only and the response exposes only `configured` and `hasToken`.
+Household creates a private Compose recovery backup, then queues the official individual update with `PATCH /v2/app_management/compose/{projectName}?force=true`. Catalog IDs map explicitly to CasaOS projects, such as `seerr` to `big-bear-seerr`. Immich is monitor/open-only, CasaOS is link-only, and there is no bulk update endpoint.
 
 | Method | Route | Body / result |
 | --- | --- | --- |
 | GET/PUT | `/api/v1/admin/casaos/config` | Write-only internal base URL/raw token configuration. |
 | POST | `/api/v1/admin/casaos/apps/{appId}/update` | `{ "confirmation": "UPDATE <appId>" }`; returns HTTP 202 queued/accepted metadata. |
-| POST | `/api/v1/admin/casaos/apps/{appId}/rollback` | `{ "confirmation": "ROLLBACK <appId>", "backupId": null }`; null selects the latest server-generated backup. |
+| POST | `/api/v1/admin/casaos/apps/{appId}/rollback` | Conservatively returns `rollback_not_safe` until automated eligibility can be proven. |
 | GET | `/api/v1/admin/casaos/apps/{appId}/actions` | Latest 50 update/rollback audit records. |
 | GET | `/api/v1/admin/casaos/apps/{appId}/actions/{actionLogId}` | One accepted/failed record; it is not live CasaOS completion status. |
 
-CasaOS returns before the asynchronous pull/apply completes. Household therefore never reports a 200 from CasaOS as completed or succeeded. Rollback applies stored interpolated YAML unchanged, but it cannot restore images removed from a registry, application data, volumes, or external dependencies; verify containers and application health in CasaOS afterward.
+CasaOS returns before the asynchronous pull/apply completes. Household therefore records the operation as `Queued`, never as completed or succeeded. Backups remain available for manual recovery, but a backup ID alone never enables automated rollback because Compose YAML cannot restore mutable images, volumes, or application data.
 
-Successful update/rollback response shape is `{ actionLogId, appId, action, status: "Queued", message, startedAt, backupId, safetyBackupId }`. History/status replaces `backupId` fields with nullable values as appropriate and also returns `finishedAt`, `previousImages`, and a safe `errorCode`; it never returns YAML or filesystem paths.
+Successful update response shape is `{ actionLogId, appId, action, status: "Queued", message, startedAt, backupId, safetyBackupId }`. History also returns `rollbackAvailable`, `finishedAt`, `previousImages`, and a safe `errorCode`; it never returns YAML or filesystem paths.
 
-`GET /modules/apps/` and `GET /modules/apps/{id}` now include nullable `updateAvailable` (`null` means unknown) and `adminActionsAvailable` (true only for an authenticated admin, a configured CasaOS connection, and an allowlisted app).
+`GET /modules/apps/` and `GET /modules/apps/{id}` expose nullable `updateAvailable` plus explicit `monitoringEnabled`, `canUpdate`, and `canRollback` capabilities. Runtime catalog reads come from SQLite; a mounted JSON file is only an insert-only bootstrap importer.
 
 Provider quick actions and assets remain under `/modules`: Games status reconciliation, timezone-aware DoIt, exact seven-day Jellywatch plus poster proxy, Pokemon sprite/download proxy, and Warcraft tracking status.
 

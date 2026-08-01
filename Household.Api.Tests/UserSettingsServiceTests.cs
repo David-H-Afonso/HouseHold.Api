@@ -69,6 +69,33 @@ public sealed class UserSettingsServiceTests
     }
 
     [Fact]
+    public async Task JellyfinPreferenceChange_PreservesActiveSeerrOverrideReservation()
+    {
+        await using var fixture = await TestDb.CreateAsync();
+        var user = await fixture.AddUserAsync("override@example.test");
+        fixture.Db.UserPreferences.Add(new UserPreference
+        {
+            UserId = user.Id,
+            JellyfinUserId = "old-jellyfin-id",
+            SeerrUserIdOverride = 7,
+            SeerrResolvedUserId = 7,
+        });
+        await fixture.Db.SaveChangesAsync();
+        var service = new UserSettingsService(fixture.Db);
+
+        await service.UpdatePreferencesAsync(
+            user.Id,
+            new UpdateUserPreferencesRequest(1, null, null, null, null, null, "new-jellyfin-id"),
+            CancellationToken.None);
+
+        fixture.Db.ChangeTracker.Clear();
+        var preference = fixture.Db.UserPreferences.Single();
+        Assert.Equal(7, preference.SeerrUserIdOverride);
+        Assert.Equal(7, preference.SeerrResolvedUserId);
+        Assert.False(preference.SeerrJellyfinMappingApproved);
+    }
+
+    [Fact]
     public async Task DashboardPositions_MustBeZeroBasedAndContiguous()
     {
         await using var fixture = await TestDb.CreateAsync();
@@ -99,6 +126,9 @@ public sealed class UserSettingsServiceTests
             await db.Database.EnsureCreatedAsync();
             return new TestDb(connection, db);
         }
+
+        public AppDbContext CreateContext() =>
+            new(new DbContextOptionsBuilder<AppDbContext>().UseSqlite(_connection).Options);
 
         public async Task<User> AddUserAsync(string email)
         {

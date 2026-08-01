@@ -8,4 +8,10 @@ public interface IAppCatalogService
     Task<AppLauncherItemDto?> GetAppAsync(Guid userId, bool isAdmin, string id, CancellationToken cancellationToken);
     Task<IReadOnlyList<AppLauncherCategoryDto>> GetCategoriesAsync(Guid userId, bool isAdmin, CancellationToken cancellationToken);
     Task<AppLauncherItemDto?> SetFavoriteAsync(Guid userId, bool isAdmin, string id, bool favorite, CancellationToken cancellationToken);
+    Task<IReadOnlyList<AdminAppCatalogItemDto>> GetAdminCatalogAsync(CancellationToken cancellationToken);
+    Task<AdminAppCatalogItemDto?> UpdateCatalogItemAsync(
+        string id,
+        UpdateAppCatalogItemRequest request,
+        CancellationToken cancellationToken
+    );
 }

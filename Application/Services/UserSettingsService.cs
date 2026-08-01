@@ -72,9 +72,21 @@ public sealed class UserSettingsService(AppDbContext db) : IUserSettingsService
             );
         }
         if (request.ClearJellyfinUserId)
+        {
             preference.JellyfinUserId = null;
+            preference.SeerrJellyfinMappingApproved = false;
+            preference.SeerrResolvedUserId = preference.SeerrUserIdOverride;
+        }
         else if (request.JellyfinUserId is not null)
-            preference.JellyfinUserId = NormalizeJellyfinUserId(request.JellyfinUserId);
+        {
+            var jellyfinUserId = NormalizeJellyfinUserId(request.JellyfinUserId);
+            if (!string.Equals(preference.JellyfinUserId, jellyfinUserId, StringComparison.OrdinalIgnoreCase))
+            {
+                preference.SeerrJellyfinMappingApproved = false;
+                preference.SeerrResolvedUserId = preference.SeerrUserIdOverride;
+            }
+            preference.JellyfinUserId = jellyfinUserId;
+        }
 
         preference.SchemaVersion = CurrentSchemaVersion;
         await db.SaveChangesAsync(cancellationToken);

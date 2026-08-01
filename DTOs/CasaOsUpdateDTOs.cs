@@ -32,7 +32,8 @@ public sealed record CasaOsActionStatusDto(
     string? BackupId,
     string? SafetyBackupId,
     IReadOnlyList<string> PreviousImages,
-    string? ErrorCode
+    string? ErrorCode,
+    bool RollbackAvailable
 );
 
 public sealed record CasaOsAppCapabilities(

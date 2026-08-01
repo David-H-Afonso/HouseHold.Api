@@ -12,6 +12,7 @@ public class AppLauncherItem
     public string? ExternalUrl { get; set; }
     public string? OpenUrl { get; set; }
     public bool Favorite { get; set; }
+    public bool Enabled { get; set; } = true;
     public bool AdminActionsEnabled { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;

@@ -12,6 +12,9 @@ public sealed class UserPreference
     public string GamesStatusOrderJson { get; set; } = "[]";
     public string HiddenGitHubReposJson { get; set; } = "[]";
     public string? JellyfinUserId { get; set; }
+    public bool SeerrJellyfinMappingApproved { get; set; }
+    public int? SeerrUserIdOverride { get; set; }
+    public int? SeerrResolvedUserId { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 

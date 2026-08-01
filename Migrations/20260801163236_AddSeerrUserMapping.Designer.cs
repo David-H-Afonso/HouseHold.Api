@@ -3,6 +3,7 @@ using System;
 using Household.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Household.Api.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260801163236_AddSeerrUserMapping")]
+    partial class AddSeerrUserMapping
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "9.0.0");
@@ -223,9 +226,6 @@ namespace Household.Api.Migrations
                     b.Property<bool>("SeerrJellyfinMappingApproved")
                         .HasColumnType("INTEGER");
 
-                    b.Property<int?>("SeerrResolvedUserId")
-                        .HasColumnType("INTEGER");
-
                     b.Property<int?>("SeerrUserIdOverride")
                         .HasColumnType("INTEGER");
 
@@ -242,18 +242,6 @@ namespace Household.Api.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("UserId");
-
-                    b.HasIndex("JellyfinUserId")
-                        .IsUnique()
-                        .HasFilter("\"SeerrJellyfinMappingApproved\" = 1 AND \"JellyfinUserId\" IS NOT NULL");
-
-                    b.HasIndex("SeerrUserIdOverride")
-                        .IsUnique()
-                        .HasFilter("\"SeerrUserIdOverride\" IS NOT NULL");
-
-                    b.HasIndex("SeerrResolvedUserId")
-                        .IsUnique()
-                        .HasFilter("\"SeerrResolvedUserId\" IS NOT NULL");
 
                     b.ToTable("UserPreferences");
                 });
@@ -683,11 +671,6 @@ namespace Household.Api.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("TEXT");
 
-                    b.Property<bool>("Enabled")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER")
-                        .HasDefaultValue(true);
-
                     b.Property<string>("ExternalUrl")
                         .HasMaxLength(500)
                         .HasColumnType("TEXT");
@@ -921,10 +904,6 @@ namespace Household.Api.Migrations
 
                     b.Property<string>("BaseUrl")
                         .HasMaxLength(500)
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid>("ConfigurationVersion")
-                        .IsConcurrencyToken()
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime>("CreatedAt")

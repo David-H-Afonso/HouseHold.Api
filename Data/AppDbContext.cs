@@ -402,6 +402,15 @@ public class AppDbContext : DbContext
             e.Property(preference => preference.GamesStatusOrderJson).IsRequired().HasMaxLength(4000);
             e.Property(preference => preference.HiddenGitHubReposJson).IsRequired().HasMaxLength(4000);
             e.Property(preference => preference.JellyfinUserId).HasMaxLength(128);
+            e.HasIndex(preference => preference.SeerrUserIdOverride)
+                .IsUnique()
+                .HasFilter("\"SeerrUserIdOverride\" IS NOT NULL");
+            e.HasIndex(preference => preference.SeerrResolvedUserId)
+                .IsUnique()
+                .HasFilter("\"SeerrResolvedUserId\" IS NOT NULL");
+            e.HasIndex(preference => preference.JellyfinUserId)
+                .IsUnique()
+                .HasFilter("\"SeerrJellyfinMappingApproved\" = 1 AND \"JellyfinUserId\" IS NOT NULL");
             e.HasOne(preference => preference.User)
                 .WithOne(user => user.Preference)
                 .HasForeignKey<UserPreference>(preference => preference.UserId)
@@ -448,6 +457,7 @@ public class AppDbContext : DbContext
             e.Property(i => i.Name).IsRequired().HasMaxLength(120);
             e.Property(i => i.BaseUrl).HasMaxLength(500);
             e.Property(i => i.OpenUrl).HasMaxLength(500);
+            e.Property(i => i.ConfigurationVersion).IsConcurrencyToken();
         });
 
         modelBuilder.Entity<IntegrationSecret>(e =>
@@ -527,6 +537,7 @@ public class AppDbContext : DbContext
             e.Property(app => app.InternalUrl).HasMaxLength(500);
             e.Property(app => app.ExternalUrl).HasMaxLength(500);
             e.Property(app => app.OpenUrl).HasMaxLength(500);
+            e.Property(app => app.Enabled).HasDefaultValue(true);
         });
 
         modelBuilder.Entity<AllowedComposeApp>(e =>

@@ -12,6 +12,7 @@ public class Integration
     public DateTime? LastCheckedAt { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    public Guid ConfigurationVersion { get; set; } = Guid.NewGuid();
 
     public ICollection<IntegrationSecret> Secrets { get; set; } = new List<IntegrationSecret>();
     public ICollection<DashboardWidget> DashboardWidgets { get; set; } = new List<DashboardWidget>();

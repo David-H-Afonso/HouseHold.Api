@@ -144,11 +144,92 @@ public sealed class CasaOsUpdateServiceTests
         Assert.Single(fixture.Db.IntegrationSecrets);
     }
 
+    [Fact]
+    public async Task Config_ServerChangeRequiresFreshCredentialsBeforeStoredTokenCanMoveHosts()
+    {
+        await using var fixture = await UserSettingsServiceTests.TestDb.CreateAsync();
+        using var temp = TempDirectory.Create();
+        var handler = new RecordingHandler(_ => throw new InvalidOperationException("HTTP must not be called"));
+        var service = CreateService(fixture, handler, new EphemeralDataProtectionProvider(), temp.Path);
+        await service.UpdateConfigAsync(
+            new UpdateCasaOsUpdateConfigRequest("http://original-casaos.lan", RawToken),
+            CancellationToken.None);
+
+        var exception = await Assert.ThrowsAsync<ArgumentException>(() => service.UpdateConfigAsync(
+            new UpdateCasaOsUpdateConfigRequest("http://replacement-casaos.lan", null),
+            CancellationToken.None));
+
+        Assert.Contains("fresh CasaOS credentials", exception.Message);
+        Assert.Empty(handler.Requests);
+        Assert.Equal("http://original-casaos.lan", fixture.Db.Integrations.Single().BaseUrl);
+    }
+
+    [Fact]
+    public async Task Update_DoesNotRefreshOrRetryCredentialsAfterServerChangesMidRequest()
+    {
+        await using var fixture = await UserSettingsServiceTests.TestDb.CreateAsync();
+        var user = await fixture.AddUserAsync("admin@example.test");
+        var protection = new EphemeralDataProtectionProvider();
+        var protector = protection.CreateProtector("Household.CasaOS.RawJwt.v1");
+        using var temp = TempDirectory.Create();
+        var serverChanged = false;
+        var handler = new RecordingHandler(_ =>
+        {
+            if (!serverChanged)
+            {
+                serverChanged = true;
+                var integration = fixture.Db.Integrations.Single();
+                integration.BaseUrl = "http://replacement-casaos.lan/root";
+                var secrets = fixture.Db.IntegrationSecrets.ToDictionary(item => item.SecretKey);
+                secrets[CasaOsUpdatePolicy.TokenSecretKey].ProtectedValue =
+                    protector.Protect("header.replacement-access.signature");
+                secrets[CasaOsUpdatePolicy.RefreshTokenSecretKey].ProtectedValue =
+                    protector.Protect("header.replacement-refresh.signature");
+                fixture.Db.SaveChanges();
+                return new HttpResponseMessage(HttpStatusCode.Unauthorized);
+            }
+
+            return JsonResponse(
+                "{\"success\":200,\"data\":{\"access_token\":\"header.rotated-access.signature\",\"refresh_token\":\"header.rotated-refresh.signature\"}}"
+            );
+        });
+        var service = CreateService(fixture, handler, protection, temp.Path);
+        await service.UpdateConfigAsync(
+            new UpdateCasaOsUpdateConfigRequest("http://original-casaos.lan/root", RawToken),
+            CancellationToken.None);
+        fixture.Db.IntegrationSecrets.Add(new IntegrationSecret
+        {
+            IntegrationId = fixture.Db.Integrations.Single().Id,
+            SecretKey = CasaOsUpdatePolicy.RefreshTokenSecretKey,
+            ProtectedValue = protector.Protect(RawRefreshToken),
+        });
+        await fixture.Db.SaveChangesAsync();
+
+        var exception = await Assert.ThrowsAsync<IntegrationGatewayException>(() => service.QueueUpdateAsync(
+            user.Id,
+            "household",
+            "UPDATE household",
+            CancellationToken.None));
+
+        Assert.Equal("casaos_reconnect_required", exception.Code);
+        Assert.Single(handler.Requests);
+        Assert.Equal("http://replacement-casaos.lan/root", fixture.Db.Integrations.Single().BaseUrl);
+        var persistedSecrets = fixture.Db.IntegrationSecrets.ToDictionary(item => item.SecretKey);
+        Assert.Equal(
+            "header.replacement-access.signature",
+            protector.Unprotect(persistedSecrets[CasaOsUpdatePolicy.TokenSecretKey].ProtectedValue));
+        Assert.Equal(
+            "header.replacement-refresh.signature",
+            protector.Unprotect(persistedSecrets[CasaOsUpdatePolicy.RefreshTokenSecretKey].ProtectedValue));
+    }
+
     [Theory]
     [InlineData("Household")]
     [InlineData("../household")]
     [InlineData("household/other")]
     [InlineData("jellyseerr")]
+    [InlineData("immich")]
+    [InlineData("casaos")]
     public async Task Update_RejectsAnythingOutsideExactAllowlist(string appId)
     {
         await using var fixture = await UserSettingsServiceTests.TestDb.CreateAsync();
@@ -213,7 +294,7 @@ public sealed class CasaOsUpdateServiceTests
     }
 
     [Fact]
-    public async Task Update_RejectsYamlOverConfiguredLimitBeforePut()
+    public async Task Update_RejectsYamlOverConfiguredLimitBeforePatch()
     {
         await using var fixture = await UserSettingsServiceTests.TestDb.CreateAsync();
         using var temp = TempDirectory.Create();
@@ -237,11 +318,11 @@ public sealed class CasaOsUpdateServiceTests
 
         Assert.Equal("casaos_response_too_large", exception.Code);
         Assert.Single(handler.Requests);
-        Assert.DoesNotContain(handler.Requests, request => request.Method == HttpMethod.Put);
+        Assert.DoesNotContain(handler.Requests, request => request.Method == HttpMethod.Patch);
     }
 
     [Fact]
-    public async Task Update_SendsExactYamlWithRawAuthorizationAndAuditsQueuedAcceptance()
+    public async Task Update_UsesOfficialPatchWithoutBodyAndAuditsQueuedAcceptance()
     {
         await using var fixture = await UserSettingsServiceTests.TestDb.CreateAsync();
         var user = await fixture.AddUserAsync("admin@example.test");
@@ -262,10 +343,11 @@ public sealed class CasaOsUpdateServiceTests
         Assert.Equal("application/yaml", handler.Requests[0].Accept);
         Assert.Equal(RawToken, handler.Requests[0].Authorization);
         Assert.Equal(RawToken, handler.Requests[1].Authorization);
-        Assert.Equal("application/yaml", handler.Requests[1].ContentType);
-        Assert.Equal(HouseholdYaml, handler.Requests[1].Body);
+        Assert.Equal(HttpMethod.Patch, handler.Requests[1].Method);
+        Assert.Null(handler.Requests[1].ContentType);
+        Assert.Null(handler.Requests[1].Body);
         Assert.Equal(
-            "/root/v2/app_management/compose/household?dry_run=false&check_port_conflict=true",
+            "/root/v2/app_management/compose/household?force=true",
             handler.Requests[1].PathAndQuery
         );
         var audit = fixture.Db.IntegrationActionLogs.Single();
@@ -279,41 +361,35 @@ public sealed class CasaOsUpdateServiceTests
     }
 
     [Fact]
-    public async Task Rollback_PutsSelectedBackupUnchangedAndCreatesSafetyBackup()
+    public async Task Rollback_IsRejectedWhenSafetyCannotBeProven()
     {
         await using var fixture = await UserSettingsServiceTests.TestDb.CreateAsync();
         var user = await fixture.AddUserAsync("admin@example.test");
         using var temp = TempDirectory.Create();
-        var getCount = 0;
         var firstHandler = new RecordingHandler(request => request.Method == HttpMethod.Get
-            ? YamlResponse(++getCount == 1
-                ? HouseholdYaml
-                : Encoding.UTF8.GetBytes("name: household\nservices:\n  api:\n    image: ghcr.io/example/household-api:new\n"))
+            ? YamlResponse(HouseholdYaml)
             : JsonResponse("{\"message\":\"accepted\"}"));
         var protection = new EphemeralDataProtectionProvider();
         var service = CreateService(fixture, firstHandler, protection, temp.Path);
         await ConfigureAsync(service);
         var update = await service.QueueUpdateAsync(user.Id, "household", "UPDATE household", CancellationToken.None);
 
-        var rollback = await service.QueueRollbackAsync(
+        var exception = await Assert.ThrowsAsync<IntegrationGatewayException>(() => service.QueueRollbackAsync(
             user.Id,
             "household",
             "ROLLBACK household",
             update.BackupId,
             CancellationToken.None
-        );
+        ));
 
-        var rollbackPut = firstHandler.Requests.Last(request => request.Method == HttpMethod.Put);
-        Assert.Equal(HouseholdYaml, rollbackPut.Body);
-        Assert.Equal(update.BackupId, rollback.BackupId);
-        Assert.NotNull(rollback.SafetyBackupId);
-        Assert.NotEqual(update.BackupId, rollback.SafetyBackupId);
-        Assert.Equal(2, fixture.Db.IntegrationActionLogs.Count());
+        Assert.Equal("rollback_not_safe", exception.Code);
+        Assert.Equal(2, firstHandler.Requests.Count);
+        Assert.Single(fixture.Db.IntegrationActionLogs);
         Assert.All(fixture.Db.IntegrationActionLogs, item => Assert.Equal(IntegrationActionStatus.Queued, item.Status));
         var history = await service.GetHistoryAsync("household", CancellationToken.None);
-        Assert.Equal(CasaOsUpdatePolicy.RollbackAction, history[0].Action);
+        Assert.Equal(CasaOsUpdatePolicy.UpdateAction, history[0].Action);
         Assert.Equal(update.BackupId, history[0].BackupId);
-        Assert.Equal(rollback.SafetyBackupId, history[0].SafetyBackupId);
+        Assert.False(history[0].RollbackAvailable);
     }
 
     [Fact]
@@ -330,6 +406,12 @@ public sealed class CasaOsUpdateServiceTests
         var parsed = await service.GetAppCapabilitiesAsync(CancellationToken.None);
         Assert.True(parsed.UpdateAvailability["household"]);
         Assert.False(parsed.UpdateAvailability["jellyfin"]);
+
+        handler.ResponseFactory = _ => JsonResponse(
+            "{\"data\":[{\"store_app_id\":\"big-bear-seerr\",\"status\":\"idle\"}]}"
+        );
+        var mappedProject = await service.GetAppCapabilitiesAsync(CancellationToken.None);
+        Assert.True(mappedProject.UpdateAvailability["seerr"]);
 
         handler.ResponseFactory = _ => JsonResponse("{\"data\":[{\"unexpected\":true}]}");
         var unknown = await service.GetAppCapabilitiesAsync(CancellationToken.None);
@@ -378,7 +460,9 @@ public sealed class CasaOsUpdateServiceTests
         var result = await service.QueueUpdateAsync(user.Id, "household", "UPDATE household", CancellationToken.None);
 
         Assert.Equal(IntegrationActionStatus.Queued, result.Status);
-        Assert.Equal(yaml, handler.Requests.Single(request => request.Method == HttpMethod.Put).Body);
+        var patch = handler.Requests.Single(request => request.Method == HttpMethod.Patch);
+        Assert.Null(patch.Body);
+        Assert.Equal("/root/v2/app_management/compose/household?force=true", patch.PathAndQuery);
     }
 
     [Fact]

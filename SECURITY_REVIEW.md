@@ -2,6 +2,8 @@
 
 > Updated 2026-07-24 for the remaining backend hardening gaps. Scope is `Household.Api` only. No `.env`, secret value, deployment, or live endpoint was accessed.
 
+> 2026-08-01 follow-up: CasaOS updates now use the official bodyless `PATCH /v2/app_management/compose/{projectName}?force=true`; automated rollback is disabled with `rollback_not_safe`. Seerr now has purpose-protected configuration, admin-approved per-user mappings, mandatory `X-API-User` isolation, permission-aware moderation, and focused tests. The older GET/PUT rollback discussion below is retained only as historical review evidence and no longer describes runtime behavior.
+
 ## Project Detection
 
 - API: ASP.NET Core minimal API on .NET 9, EF Core/SQLite, JWT bearer auth, Data Protection, built-in rate limiting.
@@ -174,3 +176,90 @@ Not applicable; this repository/scope is API-only.
 ## Continuation Notes For AI Agents
 
 Frontend work should treat nullable `timeZoneId` as first use and patch the browser IANA timezone, but frontend was explicitly excluded here. Preserve dedicated integration ownership, one-refresh-only auth handling, Games definitive-vs-ambiguous classification, per-user Jellyfin grants, and correlation-ID validation. DoIt client/provider files were intentionally untouched.
+
+## 2026-08-01 Focused Uncommitted Integration Review
+
+### Scope And Executive Summary
+
+This follow-up reviewed the current staged, unstaged, and untracked Seerr, database catalog, catalog editor, and CasaOS update work together with `Household.Front`. One **High** CasaOS credential-crossover race was confirmed and fixed. No Critical findings were found, and no High or Medium findings remain open in this scope. The concrete correctness findings identified below were also fixed and covered by the final verification run.
+
+### Changes Made
+
+- `Infrastructure/Integrations/CasaOs/CasaOsUpdateService.cs:94-108,620-638,735-741`: serialize every configuration write with token rotation, reload configuration without EF tracking, and refuse a 401 refresh/retry if the integration record or authority changed. This prevents credentials from one CasaOS server replacing or being retried against another server during a concurrent admin reconfiguration.
+- `Household.Api.Tests/CasaOsUpdateServiceTests.cs:167-224`: added a regression test that changes the configured server and protected token pair while an old-host request is in flight, then verifies there is no refresh/retry and the replacement credentials remain intact.
+- Added a canonical resolved Seerr identity with a unique partial index, duplicate checks, race-safe persistence, and lazy backfill for existing mappings. Jellyfin and numeric override mappings can no longer resolve two Household users to the same Seerr account.
+- Serialized Seerr configuration writes, reload configuration inside the lock, require the API key again for any internal URL change, and use a database concurrency token so stale writes fail atomically across contexts or application instances.
+- Jellyfin preference edits now preserve the canonical reservation whenever a numeric Seerr override remains active.
+- Restricted Seerr artwork to fixed TMDB proxy paths, bounded season input and response-body reads, and corrected delete authorization/error mapping.
+- Reworked catalog bootstrap to merge mounted metadata while retaining trusted operational targets, remove case-insensitive duplicates, and replace known policies with canonical values before requests are served.
+- Single-app reads no longer refresh the complete catalog, category reads no longer perform operational probes, and Docker, CasaOS, and health calls share a process-wide concurrency bound.
+
+### Findings
+
+#### Critical
+
+- None.
+
+#### High
+
+- **Fixed — concurrent CasaOS reconfiguration could cross credential/server boundaries.** A request holding the old connection could receive `401`, reload a newly configured token pair, and retry it against the old request URL; tracked EF entities could also overwrite the new server's credentials with a rotation from the old server. The shared lock, no-tracking reload, integration-ID check, and authority check now fail closed. Evidence: `CasaOsUpdateService.cs:94-108,620-638,735-741`; regression test `CasaOsUpdateServiceTests.cs:167-224`.
+- **Fixed — concurrent Seerr reconfiguration could cross credential/server boundaries.** Configuration writes now reload under a process-wide lock, every internal URL change requires the API key again, and `Integration.ConfigurationVersion` provides optimistic concurrency across database contexts and application instances. A stale integration/secret write rolls back and returns `seerr_config_conflict`; the version is also part of every Jellyfin mapping-cache key, so another instance cannot reuse user IDs from the previous Seerr server.
+
+#### Medium
+
+- **Fixed — Seerr mappings were not one-to-one.** `SeerrResolvedUserId` now stores the canonical upstream identity and has a unique partial index. Admin updates reject duplicates across mapping sources, concurrent writes fail closed, and existing approved mappings are backfilled on resolution.
+- **Fixed — Jellyfin preference edits could release an active numeric override reservation.** Clearing or changing Jellyfin metadata now retains `SeerrResolvedUserId` whenever `SeerrUserIdOverride` remains active.
+- **Fixed — Seerr could cause browser requests to arbitrary image hosts.** Artwork now accepts only path-safe TMDB images or already-proxied images on the configured Seerr public authority; all other absolute URLs are dropped.
+- **Fixed — catalog reads could create unbounded operational fan-out.** Single-item and favorite reads fetch only one item, category reads query metadata only, CasaOS and health requests are process-wide concurrency-bounded, and Docker inspection is bounded inside `ContainerStatusService` so direct status routes cannot bypass the limit.
+- **Fixed — legacy catalog rows could become unsafe monitoring inputs.** Bootstrap groups IDs case-insensitively, disables duplicate launcher rows, removes duplicate policies, and overwrites every known operational policy with canonical project, container, capability, and health values.
+- **Fixed correctness — mounted overrides for built-in apps were skipped.** Mounted name, category, description, icon, and favorite values are merged into canonical rows while canonical URLs and all operational policy fields remain trusted.
+- **Fixed — Seerr TV season input was unbounded.** Requests now accept at most 100 distinct seasons in the range 0 through 200.
+- **Fixed — Seerr response bodies lacked an independent deadline.** Buffered body reads and JSON parsing use a linked, bounded content-phase cancellation token.
+
+#### Low
+
+- **Fixed correctness — delete availability/error mapping was broader than the Seerr contract.** Non-managers now see delete only for their own pending requests, while managers retain moderation controls; upstream `401` and `403` responses map to a safe forbidden result.
+
+### Verified Controls
+
+- Every user-scoped Seerr discovery, detail, request-list, create, moderate, and delete call resolves the authenticated Household user's approved mapping and sends `X-API-User`; admin bootstrap/config/mapping-resolution calls are the only API-key-owner calls. `SeerrService.cs:293-535,537-656`.
+- Seerr configuration and mapping endpoints require backend authentication and explicit `IsAdmin`; a normal user's self-edited Jellyfin ID clears approval. `Endpoints/SeerrEndpoints.cs:11-51`; `Application/Services/UserSettingsService.cs:74-85`.
+- Seerr and CasaOS use no-redirect handlers. Server authority changes require fresh secrets, responses never return API keys/tokens, and logs reviewed here use only safe event/error-type metadata. `Program.cs:442-447`; `SeerrService.cs:138-174`; `CasaOsUpdateService.cs:117-171`.
+- CasaOS uses the documented bodyless `PATCH /v2/app_management/compose/{projectName}?force=true`, a fixed exact project map, exact confirmations, no bulk endpoint, and disabled automated rollback. `Application/Interfaces/ICasaOsUpdateService.cs:38-89`; `CasaOsUpdateService.cs:309-390,486-503`.
+- Backup IDs, root confinement, unpredictable names, reparse-point checks, size bounds, and owner-only Unix creation remain in place. `CasaOsUpdateService.cs:961-1202`.
+- Catalog mutation uses an explicit metadata-only DTO; app IDs, health targets, container names, project names, and operation permissions are not mass-assignable. `DTOs/AppLauncherDTOs.cs:32-56`; `Application/Services/AppCatalogService.cs:143-165`.
+
+### Environment Variable Classification
+
+| Variables | Classification | Frontend-safe | Action |
+| --- | --- | --- | --- |
+| `SEERR_API_KEY` | backend secret | **No** | Keep only in API/hosting configuration; it is purpose-protected when bootstrapped. |
+| `SEERR_BASE_URL` | backend internal configuration | No browser need | Keep server-side; fixed-path requests only. |
+| `SEERR_OPEN_URL` | browser-visible public URL | Yes, if intentionally public | Validate deployment value; never append credentials or tokens. |
+| `SEERR_TIMEOUT_SECONDS` | backend configuration | No browser need | Keep server-side. |
+| `CASAOS_*` token values | backend secrets | **No** | Continue using the write-only admin endpoint; never place in frontend variables. |
+
+### Auth, Rate Limiting, And Response Matrix
+
+- Unauthenticated Seerr/catalog/CasaOS requests: backend group authorization rejects them.
+- Normal user vs admin: catalog and Seerr configuration/mapping writes return forbidden; CasaOS operations are admin-only.
+- User A vs User B: user-scoped Seerr requests carry the mapped Seerr ID in `X-API-User`; canonical resolved IDs and source-specific identifiers are unique in SQLite.
+- Seerr reads/mutations: 90/minute and 20/minute per Household user. Admin Seerr config/mapping writes use the admin policy. Catalog reads use 12/minute per user and operational calls are globally concurrency-bounded.
+- `401`, `403`, `404`, `429`, and `5xx` responses are converted to safe frontend messages, including delete-specific authorization failures.
+
+### Tests And Commands
+
+- API build: **passed**, zero warnings and zero errors.
+- API tests: **passed**, 157 tests.
+- EF model consistency: **passed**, no pending model changes.
+- Fresh SQLite migration chain through `20260801193920_HardenSeerrIsolation`: **passed**.
+- Live API startup and anonymous `/health`: **passed**, `status=healthy`, `db=ok`.
+- Frontend lint: **passed**; Vitest: **passed**, 15 files / 29 tests; production build: **passed**.
+- The backend verification used a temporary worktree under `C:\Users\Rikku\AppData\Local\Temp\opencode` because MSBuild hangs under the deep `K:` workspace path.
+
+### Scripts, CI, ZAP, And Follow-up
+
+- Security scripts, dependencies, and GitHub workflows were not changed; this review was constrained to concrete regressions in current work. Existing CI already restores, builds, and tests on pull requests.
+- ZAP/full dynamic scanning and live CasaOS/Seerr mutations were skipped because they would mutate infrastructure. No containers or live configuration were changed during this review.
+- Before deployment, back up the production SQLite database and execute one controlled CasaOS update while confirming that no redirect occurs and only the expected project restarts.
+- Password reset, cookies/CSRF, uploads, and unrelated API modules were not re-reviewed; no change in this scope affected them.

@@ -1,0 +1,39 @@
+﻿using Microsoft.EntityFrameworkCore.Migrations;
+
+#nullable disable
+
+namespace Household.Api.Migrations
+{
+    /// <inheritdoc />
+    public partial class AddSeerrUserMapping : Migration
+    {
+        /// <inheritdoc />
+        protected override void Up(MigrationBuilder migrationBuilder)
+        {
+            migrationBuilder.AddColumn<bool>(
+                name: "SeerrJellyfinMappingApproved",
+                table: "UserPreferences",
+                type: "INTEGER",
+                nullable: false,
+                defaultValue: false);
+
+            migrationBuilder.AddColumn<int>(
+                name: "SeerrUserIdOverride",
+                table: "UserPreferences",
+                type: "INTEGER",
+                nullable: true);
+        }
+
+        /// <inheritdoc />
+        protected override void Down(MigrationBuilder migrationBuilder)
+        {
+            migrationBuilder.DropColumn(
+                name: "SeerrJellyfinMappingApproved",
+                table: "UserPreferences");
+
+            migrationBuilder.DropColumn(
+                name: "SeerrUserIdOverride",
+                table: "UserPreferences");
+        }
+    }
+}

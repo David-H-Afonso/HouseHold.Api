@@ -94,5 +94,28 @@ public static class AppsModuleEndpoints
             .WithName("SetAppFavorite")
             .WithSummary("Set the current user's favorite for an app launcher entry")
             .RequireRateLimiting("mutation");
+
+        var admin = app.MapGroup("/api/v1/admin/apps/catalog")
+            .WithTags("Apps Admin")
+            .RequireAuthorization()
+            .RequireRateLimiting("admin");
+
+        admin.MapGet("/", async (
+            HttpContext context,
+            IAppCatalogService service,
+            CancellationToken ct) =>
+            context.IsAdmin() ? Results.Ok(await service.GetAdminCatalogAsync(ct)) : Results.Forbid());
+
+        admin.MapPatch("/{id}", async (
+            string id,
+            UpdateAppCatalogItemRequest request,
+            HttpContext context,
+            IAppCatalogService service,
+            CancellationToken ct) =>
+        {
+            if (!context.IsAdmin()) return Results.Forbid();
+            var result = await service.UpdateCatalogItemAsync(id, request, ct);
+            return result is null ? Results.NotFound() : Results.Ok(result);
+        }).RequireRateLimiting("mutation");
     }
 }

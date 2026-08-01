@@ -12,6 +12,7 @@ public sealed class IntegrationServiceTests
         yield return [IntegrationType.CasaOS];
         yield return [IntegrationType.Jellyfin];
         yield return [IntegrationType.GitHubActions];
+        yield return [IntegrationType.Seerr];
     }
 
     [Theory]
