@@ -6,8 +6,6 @@ public sealed record CasaOsUpdateConfigDto(bool Configured, bool HasToken, bool 
 
 public sealed record UpdateCasaOsUpdateConfigRequest(string InternalBaseUrl, string? RawToken, string? RawRefreshToken = null);
 
-public sealed record CasaOsUpdateRequest(string Confirmation);
-
 public sealed record CasaOsRollbackRequest(string Confirmation, string? BackupId);
 
 public sealed record CasaOsQueuedOperationDto(

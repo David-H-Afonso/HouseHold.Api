@@ -14,7 +14,6 @@ public interface ICasaOsUpdateService
     Task<CasaOsQueuedOperationDto> QueueUpdateAsync(
         Guid actorUserId,
         string appId,
-        string confirmation,
         CancellationToken cancellationToken
     );
     Task<CasaOsQueuedOperationDto> QueueRollbackAsync(

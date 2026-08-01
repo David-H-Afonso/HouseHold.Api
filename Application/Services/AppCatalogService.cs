@@ -263,11 +263,11 @@ public sealed class AppCatalogService(
             containers.FirstOrDefault(container => !string.IsNullOrWhiteSpace(container.Image))?.Image,
             containers.SelectMany(container => container.Ports).Distinct().OrderBy(port => port).ToList(),
             containers.Select(container => container.StartedAt).Where(value => value.HasValue).Max(),
-            updateAvailable,
-            canUpdate,
-            monitoringEnabled,
-            canUpdate,
-            false);
+             updateAvailable,
+             canUpdate,
+             monitoringEnabled,
+             canUpdate,
+             canUpdate);
 
     private static AdminAppCatalogItemDto ToAdminDto(AppLauncherItem item, AllowedComposeApp? policy) => new(
         item.AppId,
@@ -279,9 +279,9 @@ public sealed class AppCatalogService(
         item.Favorite,
         item.Enabled,
         policy is not null,
-        policy?.AdminActionsEnabled == true && CasaOsUpdatePolicy.IsAllowedAppId(item.AppId),
-        false,
-        item.UpdatedAt);
+         policy?.AdminActionsEnabled == true && CasaOsUpdatePolicy.IsAllowedAppId(item.AppId),
+         policy?.AdminActionsEnabled == true && CasaOsUpdatePolicy.IsAllowedAppId(item.AppId),
+         item.UpdatedAt);
 
     private async Task<string> CheckHealthAsync(string? url, CancellationToken cancellationToken)
     {

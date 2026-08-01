@@ -309,12 +309,10 @@ public sealed class CasaOsUpdateService : ICasaOsUpdateService
     public async Task<CasaOsQueuedOperationDto> QueueUpdateAsync(
         Guid actorUserId,
         string appId,
-        string confirmation,
         CancellationToken cancellationToken
     )
     {
         RequireAllowedAppId(appId);
-        RequireConfirmation(confirmation, $"UPDATE {appId}");
         var projectName = CasaOsUpdatePolicy.GetProjectName(appId);
 
         var gate = await AcquireAppLockAsync(appId, cancellationToken);
@@ -370,7 +368,7 @@ public sealed class CasaOsUpdateService : ICasaOsUpdateService
         }
     }
 
-    public Task<CasaOsQueuedOperationDto> QueueRollbackAsync(
+    public async Task<CasaOsQueuedOperationDto> QueueRollbackAsync(
         Guid actorUserId,
         string appId,
         string confirmation,
@@ -382,11 +380,70 @@ public sealed class CasaOsUpdateService : ICasaOsUpdateService
         RequireConfirmation(confirmation, $"ROLLBACK {appId}");
         if (backupId is not null)
             RequireValidBackupId(backupId);
-        cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromException<CasaOsQueuedOperationDto>(new IntegrationGatewayException(
-            HttpStatusCode.Conflict,
-            "Automated rollback is unavailable because this update cannot be proven safe.",
-            "rollback_not_safe"));
+        var projectName = CasaOsUpdatePolicy.GetProjectName(appId);
+
+        var gate = await AcquireAppLockAsync(appId, cancellationToken);
+        try
+        {
+            var connection = await RequireConnectionAsync(cancellationToken);
+            var actionLog = await StartActionAsync(
+                actorUserId,
+                connection.IntegrationId,
+                appId,
+                CasaOsUpdatePolicy.RollbackAction,
+                cancellationToken
+            );
+            var accepted = false;
+            try
+            {
+                var selectedBackupId = backupId ?? FindLatestBackupId(appId);
+                var backupYaml = await ReadBackupAsync(appId, selectedBackupId, cancellationToken);
+                var previousImages = ValidateComposeYaml(backupYaml, projectName);
+
+                var currentYaml = await GetCurrentYamlAsync(connection, projectName, cancellationToken);
+                var currentImages = ValidateComposeYaml(currentYaml, projectName);
+                var safetyBackupId = await WriteBackupAsync(appId, currentYaml, cancellationToken);
+
+                actionLog.ResultSummaryJson = SerializeAudit(new
+                {
+                    backupId = selectedBackupId,
+                    safetyBackupId,
+                    projectName,
+                    previousImages,
+                    currentImages,
+                });
+                await _db.SaveChangesAsync(cancellationToken);
+
+                await PutComposeAsync(connection, projectName, backupYaml, cancellationToken);
+                accepted = true;
+                actionLog.Status = IntegrationActionStatus.Queued;
+                await _db.SaveChangesAsync(cancellationToken);
+
+                return ToQueuedDto(actionLog, selectedBackupId, safetyBackupId);
+            }
+            catch (Exception exception) when (!accepted)
+            {
+                await TryMarkFailedAsync(actionLog, GetSafeErrorCode(exception));
+                throw NormalizeOperationException(exception);
+            }
+            catch (Exception)
+            {
+                _logger.LogError(
+                    "CasaOS accepted rollback {ActionLogId} for {AppId}, but its queued audit status could not be persisted",
+                    actionLog.Id,
+                    appId
+                );
+                throw new IntegrationGatewayException(
+                    HttpStatusCode.BadGateway,
+                    "CasaOS accepted the rollback, but Household could not persist its final queued status.",
+                    "casaos_acceptance_audit_uncertain"
+                );
+            }
+        }
+        finally
+        {
+            gate.Release();
+        }
     }
 
     public async Task<IReadOnlyList<CasaOsActionStatusDto>> GetHistoryAsync(
@@ -500,6 +557,28 @@ public sealed class CasaOsUpdateService : ICasaOsUpdateService
             return request;
         }, connection, cancellationToken);
         RequireCasaOsOk(response, "queue app update");
+    }
+
+    private async Task PutComposeAsync(
+        Connection connection,
+        string projectName,
+        byte[] yaml,
+        CancellationToken cancellationToken
+    )
+    {
+        var escapedProjectName = Uri.EscapeDataString(projectName);
+        using var response = await SendAsync(() =>
+        {
+            var request = CreateRequest(
+                HttpMethod.Put,
+                connection,
+                $"v2/app_management/compose/{escapedProjectName}"
+            );
+            request.Content = new ByteArrayContent(yaml);
+            request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/yaml");
+            return request;
+        }, connection, cancellationToken);
+        RequireCasaOsOk(response, "restore compose YAML");
     }
 
     private async Task<HttpResponseMessage> SendAsync(
@@ -1335,7 +1414,9 @@ public sealed class CasaOsUpdateService : ICasaOsUpdateService
             safetyBackupId,
             previousImages,
             log.ErrorMessage,
-            false
+            log.Action == CasaOsUpdatePolicy.UpdateAction
+                && backupId is not null
+                && (log.Status is IntegrationActionStatus.Queued or IntegrationActionStatus.Succeeded)
         );
     }
 

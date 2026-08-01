@@ -35,7 +35,6 @@ public static class CasaOsUpdateEndpoints
                 "/apps/{appId}/update",
                 async (
                     string appId,
-                    CasaOsUpdateRequest request,
                     HttpContext context,
                     ICasaOsUpdateService service,
                     CancellationToken ct
@@ -43,7 +42,7 @@ public static class CasaOsUpdateEndpoints
                 {
                     if (!context.IsAdmin() || context.GetUserId() is not Guid actorUserId)
                         return Results.Forbid();
-                    var result = await service.QueueUpdateAsync(actorUserId, appId, request.Confirmation, ct);
+                    var result = await service.QueueUpdateAsync(actorUserId, appId, ct);
                     return Results.Accepted(value: result);
                 }
             )
