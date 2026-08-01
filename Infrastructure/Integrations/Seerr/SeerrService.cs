@@ -1049,6 +1049,15 @@ public sealed class SeerrService : ISeerrService
             || string.IsNullOrWhiteSpace(publicUrl)
             || !Uri.TryCreate(publicUrl, UriKind.Absolute, out var publicUri))
             return null;
+        path = path.Trim();
+        if (path.StartsWith("/", StringComparison.Ordinal))
+        {
+            if (path.StartsWith("//", StringComparison.Ordinal)
+                || path.Contains("..", StringComparison.Ordinal)
+                || path.Any(char.IsControl))
+                return null;
+            return $"{publicUrl.TrimEnd('/')}/imageproxy/tmdb/t/p/{size}{path}";
+        }
         if (Uri.TryCreate(path, UriKind.Absolute, out var absolute))
         {
             if (absolute.Scheme is not ("http" or "https")
@@ -1064,12 +1073,7 @@ public sealed class SeerrService : ISeerrService
                 return absolute.ToString();
             return null;
         }
-        if (!path.StartsWith('/')
-            || path.StartsWith("//", StringComparison.Ordinal)
-            || path.Contains("..", StringComparison.Ordinal)
-            || path.Any(char.IsControl))
-            return null;
-        return $"{publicUrl.TrimEnd('/')}/imageproxy/tmdb/t/p/{size}{path}";
+        return null;
     }
 
     private static string NormalizeHttpUrl(string value)

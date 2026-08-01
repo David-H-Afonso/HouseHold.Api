@@ -65,6 +65,23 @@ public sealed class SeerrServiceTests
     }
 
     [Fact]
+    public async Task Search_MapsRootRelativeImagePathsOnEveryPlatform()
+    {
+        await using var fixture = await UserSettingsServiceTests.TestDb.CreateAsync();
+        var user = await fixture.AddUserAsync("member@example.test");
+        fixture.Db.UserPreferences.Add(new UserPreference { UserId = user.Id, SeerrUserIdOverride = 7 });
+        var handler = new RecordingHandler(_ => JsonResponse(
+            "{\"page\":1,\"totalPages\":1,\"totalResults\":1,\"results\":[{\"id\":11,\"mediaType\":\"movie\",\"title\":\"Dune\",\"posterPath\":\"/dune.jpg\"}]}"));
+        var service = await CreateConfiguredServiceAsync(fixture, handler);
+
+        var result = await service.SearchAsync(user.Id, "Dune", 1, CancellationToken.None);
+
+        Assert.Equal(
+            "https://seerr.example.test/imageproxy/tmdb/t/p/w600_and_h900_bestv2/dune.jpg",
+            Assert.Single(result.Results).PosterPath);
+    }
+
+    [Fact]
     public async Task Search_AdminOverrideAlwaysAddsMappedUserHeader()
     {
         await using var fixture = await UserSettingsServiceTests.TestDb.CreateAsync();

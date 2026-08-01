@@ -250,7 +250,7 @@ This follow-up reviewed the current staged, unstaged, and untracked Seerr, datab
 ### Tests And Commands
 
 - API build: **passed**, zero warnings and zero errors.
-- API tests: **passed**, 157 tests.
+- API tests: **passed**, 158 tests.
 - EF model consistency: **passed**, no pending model changes.
 - Fresh SQLite migration chain through `20260801193920_HardenSeerrIsolation`: **passed**.
 - Live API startup and anonymous `/health`: **passed**, `status=healthy`, `db=ok`.
