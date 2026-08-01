@@ -189,9 +189,7 @@ This follow-up reviewed the Seerr integration, database catalog, catalog editor,
 
 - Every user-scoped Seerr discovery, detail, request-list, create, moderate, and delete call resolves the authenticated Household user's approved mapping and sends `X-API-User`; admin bootstrap/config/mapping-resolution calls are the only API-key-owner calls. `SeerrService.cs:293-535,537-656`.
 - Seerr configuration and mapping endpoints require backend authentication and explicit `IsAdmin`; a normal user's self-edited Jellyfin ID clears approval. `Endpoints/SeerrEndpoints.cs:11-51`; `Application/Services/UserSettingsService.cs:74-85`.
-- Seerr and CasaOS use no-redirect handlers. Server authority changes require fresh secrets, responses never return API keys/tokens, and logs reviewed here use only safe event/error-type metadata. `Program.cs:442-447`; `SeerrService.cs:138-174`; `CasaOsUpdateService.cs:117-171`.
-- CasaOS uses the documented bodyless `PATCH /v2/app_management/compose/{projectName}?force=true`, a fixed exact project map, exact confirmations, no bulk endpoint, and disabled automated rollback. `Application/Interfaces/ICasaOsUpdateService.cs:38-89`; `CasaOsUpdateService.cs:309-390,486-503`.
-- Backup IDs, root confinement, unpredictable names, reparse-point checks, size bounds, and owner-only Unix creation remain in place. `CasaOsUpdateService.cs:961-1202`.
+- Seerr uses a no-redirect handler. Server authority changes require fresh secrets, responses never return API keys/tokens, and logs reviewed here use only safe event/error-type metadata. `Program.cs:438-443`; `SeerrService.cs:138-174`.
 - Catalog mutation uses an explicit metadata-only DTO; app IDs, health targets, container names, project names, and operation permissions are not mass-assignable. `DTOs/AppLauncherDTOs.cs:32-56`; `Application/Services/AppCatalogService.cs:143-165`.
 
 ### Environment Variable Classification
@@ -202,12 +200,11 @@ This follow-up reviewed the Seerr integration, database catalog, catalog editor,
 | `SEERR_BASE_URL` | backend internal configuration | No browser need | Keep server-side; fixed-path requests only. |
 | `SEERR_OPEN_URL` | browser-visible public URL | Yes, if intentionally public | Validate deployment value; never append credentials or tokens. |
 | `SEERR_TIMEOUT_SECONDS` | backend configuration | No browser need | Keep server-side. |
-| `CASAOS_*` token values | backend secrets | **No** | Continue using the write-only admin endpoint; never place in frontend variables. |
 
 ### Auth, Rate Limiting, And Response Matrix
 
-- Unauthenticated Seerr/catalog/CasaOS requests: backend group authorization rejects them.
-- Normal user vs admin: catalog and Seerr configuration/mapping writes return forbidden; CasaOS operations are admin-only.
+- Unauthenticated Seerr/catalog requests: backend group authorization rejects them.
+- Normal user vs admin: catalog and Seerr configuration/mapping writes return forbidden.
 - User A vs User B: user-scoped Seerr requests carry the mapped Seerr ID in `X-API-User`; canonical resolved IDs and source-specific identifiers are unique in SQLite.
 - Seerr reads/mutations: 90/minute and 20/minute per Household user. Admin Seerr config/mapping writes use the admin policy. Catalog reads use 12/minute per user and operational calls are globally concurrency-bounded.
 - `401`, `403`, `404`, `429`, and `5xx` responses are converted to safe frontend messages, including delete-specific authorization failures.
@@ -215,7 +212,7 @@ This follow-up reviewed the Seerr integration, database catalog, catalog editor,
 ### Tests And Commands
 
 - API build: **passed**, zero warnings and zero errors.
-- API tests: **passed**, 158 tests.
+- API tests: **passed**, 133 tests after removing the CasaOS operation suite.
 - EF model consistency: **passed**, no pending model changes.
 - Fresh SQLite migration chain through `20260801193920_HardenSeerrIsolation`: **passed**.
 - Live API startup and anonymous `/health`: **passed**, `status=healthy`, `db=ok`.
@@ -225,6 +222,6 @@ This follow-up reviewed the Seerr integration, database catalog, catalog editor,
 ### Scripts, CI, ZAP, And Follow-up
 
 - Security scripts, dependencies, and GitHub workflows were not changed; this review was constrained to concrete regressions in current work. Existing CI already restores, builds, and tests on pull requests.
-- ZAP/full dynamic scanning and live CasaOS/Seerr mutations were skipped because they would mutate infrastructure. No containers or live configuration were changed during this review.
-- Before deployment, back up the production SQLite database and execute one controlled CasaOS update while confirming that no redirect occurs and only the expected project restarts.
+- ZAP/full dynamic scanning and live Seerr mutations were skipped because they would mutate infrastructure. No containers or live configuration were changed during this review.
+- Before deployment, back up the production SQLite database and verify the read-only app catalog against the deployed Docker/network configuration.
 - Password reset, cookies/CSRF, uploads, and unrelated API modules were not re-reviewed; no change in this scope affected them.

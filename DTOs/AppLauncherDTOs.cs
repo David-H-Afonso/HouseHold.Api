@@ -18,7 +18,11 @@ public record AppLauncherItemDto(
     string? Image,
     IReadOnlyList<string> Ports,
     DateTime? LastUpdated,
-    bool MonitoringEnabled
+    bool? UpdateAvailable,
+    bool AdminActionsAvailable,
+    bool MonitoringEnabled,
+    bool CanUpdate,
+    bool CanRollback
 );
 
 public record AppLauncherCategoryDto(string Name, int Count);
@@ -35,6 +39,8 @@ public sealed record AdminAppCatalogItemDto(
     bool Favorite,
     bool Enabled,
     bool MonitoringEnabled,
+    bool CanUpdate,
+    bool CanRollback,
     DateTime UpdatedAt
 );
 

@@ -17,6 +17,7 @@ using Household.Api.Infrastructure.Integrations.Jellywatch;
 using Household.Api.Infrastructure.Integrations.WarcraftArchive;
 using Household.Api.Infrastructure.Integrations.Jellyfin;
 using Household.Api.Infrastructure.Integrations.GitHub;
+using Household.Api.Infrastructure.Integrations.CasaOs;
 using Household.Api.Middleware;
 using Household.Api.Models.Auth;
 using Household.Api.Operations;
@@ -83,6 +84,10 @@ ApplyEnvOverride(builder.Configuration, "SeerrSettings:BaseUrl", "SEERR_BASE_URL
 ApplyEnvOverride(builder.Configuration, "SeerrSettings:PublicUrl", "SEERR_OPEN_URL");
 ApplyEnvOverride(builder.Configuration, "SeerrSettings:ApiKey", "SEERR_API_KEY");
 ApplyEnvOverrideInt(builder.Configuration, "SeerrSettings:RequestTimeoutSeconds", "SEERR_TIMEOUT_SECONDS");
+ApplyEnvOverride(builder.Configuration, "CasaOsUpdateSettings:BackupRoot", "CASAOS_COMPOSE_BACKUP_ROOT");
+ApplyEnvOverrideInt(builder.Configuration, "CasaOsUpdateSettings:RequestTimeoutSeconds", "CASAOS_UPDATE_TIMEOUT_SECONDS");
+ApplyEnvOverrideInt(builder.Configuration, "CasaOsUpdateSettings:MaxYamlBytes", "CASAOS_MAX_YAML_BYTES");
+ApplyEnvOverrideInt(builder.Configuration, "CasaOsUpdateSettings:MaxJsonBytes", "CASAOS_MAX_JSON_BYTES");
 ApplyEnvOverride(builder.Configuration, "HouseholdConnectionSettings:DoItBaseUrl", "DOIT_BASE_URL");
 ApplyEnvOverride(builder.Configuration, "HouseholdConnectionSettings:DoItOpenUrl", "DOIT_OPEN_URL");
 ApplyEnvOverride(
@@ -146,6 +151,9 @@ builder.Services.Configure<HouseholdConnectionSettings>(
 );
 builder.Services.Configure<ExternalIntegrationSettings>(
     builder.Configuration.GetSection(ExternalIntegrationSettings.SectionName)
+);
+builder.Services.Configure<CasaOsUpdateSettings>(
+    builder.Configuration.GetSection(CasaOsUpdateSettings.SectionName)
 );
 builder.Services.Configure<SeerrSettings>(
     builder.Configuration.GetSection(SeerrSettings.SectionName)
@@ -434,6 +442,10 @@ builder.Services.AddHttpClient<IGitHubActionsMonitor, GitHubActionsMonitor>().Co
 builder.Services.AddHttpClient<ISeerrService, Household.Api.Infrastructure.Integrations.Seerr.SeerrService>()
     .ConfigurePrimaryHttpMessageHandler(NoRedirectHandler);
 builder.Services.AddHostedService<GitHubActionsPollingService>();
+builder.Services.AddSingleton<CasaOsUpdateLocks>();
+builder.Services.AddHttpClient<ICasaOsUpdateService, CasaOsUpdateService>()
+    .ConfigurePrimaryHttpMessageHandler(NoRedirectHandler);
+builder.Services.AddHostedService<CasaOsTokenRefreshHostedService>();
 builder.Services.AddHttpClient("AppHealth", client => client.Timeout = TimeSpan.FromSeconds(5))
     .ConfigurePrimaryHttpMessageHandler(NoRedirectHandler);
 builder.Services.AddSingleton<HouseholdProviderRegistry>();
@@ -583,6 +595,7 @@ app.MapHouseholdConnectionEndpoints();
 app.MapSettingsEndpoints();
 app.MapJellyfinEndpoints();
 app.MapGitHubActionsEndpoints();
+app.MapCasaOsUpdateEndpoints();
 app.MapSeerrEndpoints();
 
 app.Run();

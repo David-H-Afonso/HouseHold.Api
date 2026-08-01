@@ -19,6 +19,7 @@ RESTful API for Household — a personal home management app covering food track
 - **Jellyfin/GitHub Actions** — Encrypted server configuration, safe proxies, and a 12-repository workflow cache
 - **Seerr requests** — Per-user discovery, requests, quotas, and permission-aware moderation with encrypted configuration
 - **App catalog** — Database-backed launcher metadata, preferred HTTPS URLs, per-user favorites, and admin editing
+- **CasaOS updates** — Admin-only, individual app-store updates with private recovery backups and conservative rollback policy
 
 ## Tech Stack
 
@@ -185,7 +186,23 @@ Jellyfin item links are browser-session deep links. Depending on the Jellyfin de
 opening one may show Jellyfin's sign-in page rather than the item; Household never places the Jellyfin API key in
 the link or browser session.
 
-`GET /modules/apps/` and `GET /modules/apps/{id}` expose launcher metadata, monitoring state, container status, and per-user favorites. Runtime catalog reads come from SQLite; a mounted JSON file is only an insert-only bootstrap importer.
+### CasaOS Update Operations (Admin Only)
+
+Household creates a private Compose recovery backup, then queues the official individual update with `PATCH /v2/app_management/compose/{projectName}?force=true`. Catalog IDs map explicitly to CasaOS projects, such as `seerr` to `big-bear-seerr`. Immich is monitor/open-only, CasaOS is link-only, and there is no bulk update endpoint.
+
+| Method | Route | Body / result |
+| --- | --- | --- |
+| GET/PUT | `/api/v1/admin/casaos/config` | Write-only internal base URL/raw token configuration. |
+| POST | `/api/v1/admin/casaos/apps/{appId}/update` | `{ "confirmation": "UPDATE <appId>" }`; returns HTTP 202 queued/accepted metadata. |
+| POST | `/api/v1/admin/casaos/apps/{appId}/rollback` | Conservatively returns `rollback_not_safe` until automated eligibility can be proven. |
+| GET | `/api/v1/admin/casaos/apps/{appId}/actions` | Latest 50 update/rollback audit records. |
+| GET | `/api/v1/admin/casaos/apps/{appId}/actions/{actionLogId}` | One accepted/failed record; it is not live CasaOS completion status. |
+
+CasaOS returns before the asynchronous pull/apply completes. Household therefore records the operation as `Queued`, never as completed or succeeded. Backups remain available for manual recovery, but a backup ID alone never enables automated rollback because Compose YAML cannot restore mutable images, volumes, or application data.
+
+Successful update response shape is `{ actionLogId, appId, action, status: "Queued", message, startedAt, backupId, safetyBackupId }`. History also returns `rollbackAvailable`, `finishedAt`, `previousImages`, and a safe `errorCode`; it never returns YAML or filesystem paths.
+
+`GET /modules/apps/` and `GET /modules/apps/{id}` expose nullable `updateAvailable` plus explicit `monitoringEnabled`, `canUpdate`, and `canRollback` capabilities. Runtime catalog reads come from SQLite; a mounted JSON file is only an insert-only bootstrap importer.
 
 Provider quick actions and assets remain under `/modules`: Games status reconciliation, timezone-aware DoIt, exact seven-day Jellywatch plus poster proxy, Pokemon sprite/download proxy, and Warcraft tracking status.
 
@@ -237,10 +254,14 @@ Household.Api/
 | `GITHUB_ACTIONS_CONCURRENCY` | Bounded workflow poll concurrency | `4` |
 | `WARCRAFT_STATUS_PATH_TEMPLATE` | Provider tracking-status route override | documented default |
 | `POKEMON_DOWNLOAD_PATH_TEMPLATE` | Provider Pokemon-download route override | documented default |
+| `CASAOS_COMPOSE_BACKUP_ROOT` | Private persistent compose backup root | `/data/compose-backups` |
+| `CASAOS_UPDATE_TIMEOUT_SECONDS` | CasaOS request timeout (clamped 5-30s) | `15` |
+| `CASAOS_MAX_YAML_BYTES` | Maximum fetched/stored compose YAML | `2097152` |
+| `CASAOS_MAX_JSON_BYTES` | Maximum upgradable-app JSON | `262144` |
 
 Jellyfin URLs/API key and the GitHub read-only fine-grained PAT are admin-set, write-only, purpose-protected database values. Household stores no Jellyfin passwords.
 
-Container status is optional and read-only. If Docker is unavailable or an internal health endpoint cannot be reached, the catalog reports an unknown state rather than claiming that an app is offline.
+CasaOS internal base URL and raw JWT are likewise admin-set and purpose-protected. Use a LAN/host address reachable from the bridged Household container, not `localhost`/`127.0.0.1`; persist `/data/compose-backups` and keep it readable only by the API container identity. No Docker socket or CasaOS app directory mount is required.
 
 The API reads local `.env` values only when the same process environment variable is not already set, so Docker/CasaOS configuration keeps precedence.
 
