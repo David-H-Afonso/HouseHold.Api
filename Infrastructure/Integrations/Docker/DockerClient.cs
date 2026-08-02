@@ -42,19 +42,43 @@ public class DockerClient : IDockerClient
         {
             var output = await RunDockerInspectAsync(safeNames, cancellationToken);
             var inspected = JsonSerializer.Deserialize<List<DockerInspectContainer>>(output, JsonOptions) ?? [];
-            var byName = inspected.ToDictionary(
-                item => NormalizeContainerName(item.Name),
-                item => ToStatus(item),
-                StringComparer.OrdinalIgnoreCase
-            );
+            var byName = inspected
+                .Where(item => !string.IsNullOrWhiteSpace(item.Name))
+                .GroupBy(item => NormalizeContainerName(item.Name), StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(
+                    group => group.Key,
+                    group => ToStatus(group.First()),
+                    StringComparer.OrdinalIgnoreCase
+                );
 
             return safeNames.Select(name => byName.TryGetValue(name, out var status) ? status : Unknown(name)).ToList();
         }
         catch (Exception ex) when (ex is IOException or InvalidOperationException or JsonException or TimeoutException)
         {
-            _logger.LogWarning(ex, "Docker inspect failed for {Count} allowlisted container(s)", safeNames.Count);
-            return safeNames.Select(Unknown).ToList();
+            _logger.LogWarning(ex, "Docker inspect failed for allowlisted containers; retrying individually");
+            return await InspectIndividuallyAsync(safeNames, cancellationToken);
         }
+    }
+
+    private async Task<IReadOnlyList<ContainerStatusDto>> InspectIndividuallyAsync(
+        IReadOnlyList<string> containerNames,
+        CancellationToken cancellationToken)
+    {
+        var result = new List<ContainerStatusDto>(containerNames.Count);
+        foreach (var name in containerNames)
+        {
+            try
+            {
+                var output = await RunDockerInspectAsync([name], cancellationToken);
+                var inspected = JsonSerializer.Deserialize<List<DockerInspectContainer>>(output, JsonOptions) ?? [];
+                result.Add(inspected.FirstOrDefault() is { } container ? ToStatus(container) : Unknown(name));
+            }
+            catch (Exception ex) when (ex is IOException or InvalidOperationException or JsonException or TimeoutException)
+            {
+                result.Add(Unknown(name));
+            }
+        }
+        return result;
     }
 
     private bool IsEnabled() =>
