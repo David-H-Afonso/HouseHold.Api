@@ -336,14 +336,12 @@ public sealed class CasaOsUpdateService : ICasaOsUpdateService
                 actionLog.ResultSummaryJson = SerializeAudit(new { backupId, projectName, previousImages });
                 await _db.SaveChangesAsync(cancellationToken);
 
-                var usedComposeReapply = !await TryPatchUpdateAsync(connection, projectName, cancellationToken);
-                if (usedComposeReapply)
-                    await PutComposeAsync(
-                        connection,
-                        projectName,
-                        NormalizeComposeImagesToLatest(currentYaml),
-                        cancellationToken
-                    );
+                await PutComposeAsync(
+                    connection,
+                    projectName,
+                    NormalizeComposeImagesToLatest(currentYaml),
+                    cancellationToken
+                );
                 accepted = true;
                 actionLog.Status = IntegrationActionStatus.Queued;
                 await _db.SaveChangesAsync(cancellationToken);
@@ -545,54 +543,6 @@ public sealed class CasaOsUpdateService : ICasaOsUpdateService
         }, connection, cancellationToken);
         RequireCasaOsOk(response, "fetch compose YAML");
         return await ReadBoundedAsync(response.Content, _maxYamlBytes, "CasaOS YAML response", cancellationToken);
-    }
-
-    private async Task<bool> TryPatchUpdateAsync(
-        Connection connection,
-        string projectName,
-        CancellationToken cancellationToken
-    )
-    {
-        var escapedProjectName = Uri.EscapeDataString(projectName);
-        using var response = await SendAsync(() =>
-        {
-            var request = CreateRequest(
-                HttpMethod.Patch,
-                connection,
-                $"v2/app_management/compose/{escapedProjectName}?force=true"
-            );
-            return request;
-        }, connection, cancellationToken);
-        if (response.IsSuccessStatusCode)
-            return true;
-        if (await IsAppStoreUnavailableAsync(response, cancellationToken))
-        {
-            _logger.LogInformation(
-                "CasaOS app {ProjectName} is not in an AppStore; reapplying its current Compose to pull configured images",
-                projectName
-            );
-            return false;
-        }
-        RequireCasaOsOk(response, "queue app update");
-        return true;
-    }
-
-    private async Task<bool> IsAppStoreUnavailableAsync(
-        HttpResponseMessage response,
-        CancellationToken cancellationToken)
-    {
-        if (response.StatusCode is not (HttpStatusCode.NotFound or HttpStatusCode.InternalServerError))
-            return false;
-
-        try
-        {
-            var content = await ReadBoundedAsync(response.Content, _maxJsonBytes, "CasaOS error response", cancellationToken);
-            return Encoding.UTF8.GetString(content).Contains("not found in app store", StringComparison.OrdinalIgnoreCase);
-        }
-        catch (IntegrationGatewayException)
-        {
-            return false;
-        }
     }
 
     private async Task PutComposeAsync(

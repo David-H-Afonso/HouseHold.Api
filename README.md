@@ -188,7 +188,7 @@ the link or browser session.
 
 ### CasaOS Update Operations (Admin Only)
 
-Household creates a private Compose recovery backup, then queues an individual CasaOS update. It uses `PATCH /v2/app_management/compose/{projectName}?force=true` for AppStore projects and falls back to reapplying the current Compose with `PUT` for self-published projects. Catalog IDs map explicitly to CasaOS projects, such as `seerr` to `big-bear-seerr`. Immich is monitor/open-only, CasaOS is link-only, and there is no bulk update endpoint.
+Household creates a private Compose recovery backup, then queues an individual CasaOS update with `PUT /v2/app_management/compose/{projectName}`. Service image references are normalized to the `latest` tag, avoiding AppStore-selected versions for apps such as Sonarr. Catalog IDs map explicitly to CasaOS projects, such as `seerr` to `big-bear-seerr`. Immich is monitor/open-only, CasaOS is link-only, and there is no bulk update endpoint.
 
 | Method | Route | Body / result |
 | --- | --- | --- |

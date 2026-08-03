@@ -282,7 +282,7 @@ public sealed class CasaOsUpdateServiceTests
     }
 
     [Fact]
-    public async Task Update_RejectsYamlOverConfiguredLimitBeforePatch()
+    public async Task Update_RejectsYamlOverConfiguredLimitBeforePut()
     {
         await using var fixture = await UserSettingsServiceTests.TestDb.CreateAsync();
         using var temp = TempDirectory.Create();
@@ -306,11 +306,11 @@ public sealed class CasaOsUpdateServiceTests
 
         Assert.Equal("casaos_response_too_large", exception.Code);
         Assert.Single(handler.Requests);
-        Assert.DoesNotContain(handler.Requests, request => request.Method == HttpMethod.Patch);
+        Assert.DoesNotContain(handler.Requests, request => request.Method == HttpMethod.Put);
     }
 
     [Fact]
-    public async Task Update_UsesOfficialPatchWithoutBodyAndAuditsQueuedAcceptance()
+    public async Task Update_UsesLatestComposeWithoutAppStoreVersionAndAuditsQueuedAcceptance()
     {
         await using var fixture = await UserSettingsServiceTests.TestDb.CreateAsync();
         var user = await fixture.AddUserAsync("admin@example.test");
@@ -331,11 +331,11 @@ public sealed class CasaOsUpdateServiceTests
         Assert.Equal("application/yaml", handler.Requests[0].Accept);
         Assert.Equal(RawToken, handler.Requests[0].Authorization);
         Assert.Equal(RawToken, handler.Requests[1].Authorization);
-        Assert.Equal(HttpMethod.Patch, handler.Requests[1].Method);
-        Assert.Null(handler.Requests[1].ContentType);
-        Assert.Null(handler.Requests[1].Body);
+        Assert.Equal(HttpMethod.Put, handler.Requests[1].Method);
+        Assert.Equal("application/yaml", handler.Requests[1].ContentType);
+        Assert.Equal(HouseholdYaml, handler.Requests[1].Body);
         Assert.Equal(
-            "/root/v2/app_management/compose/household?force=true",
+            "/root/v2/app_management/compose/household",
             handler.Requests[1].PathAndQuery
         );
         var audit = fixture.Db.IntegrationActionLogs.Single();
@@ -349,29 +349,21 @@ public sealed class CasaOsUpdateServiceTests
     }
 
     [Fact]
-    public async Task Update_ReappliesCurrentComposeWhenCasaOsAppIsNotInAnAppStore()
+    public async Task Update_ReappliesCurrentComposeWithLatestImages()
     {
         await using var fixture = await UserSettingsServiceTests.TestDb.CreateAsync();
         var user = await fixture.AddUserAsync("admin@example.test");
         using var temp = TempDirectory.Create();
-        var handler = new RecordingHandler(request => request.Method switch
-        {
-            var method when method == HttpMethod.Get => YamlResponse(VersionedHouseholdYaml),
-            var method when method == HttpMethod.Patch => ErrorJsonResponse(
-                HttpStatusCode.InternalServerError,
-                "{\"message\":\"not found in app store\"}"
-            ),
-            _ => JsonResponse("{\"message\":\"accepted\"}"),
-        });
+        var handler = new RecordingHandler(request => request.Method == HttpMethod.Get
+            ? YamlResponse(VersionedHouseholdYaml)
+            : JsonResponse("{\"message\":\"accepted\"}"));
         var service = CreateService(fixture, handler, new EphemeralDataProtectionProvider(), temp.Path);
         await ConfigureAsync(service);
 
         var result = await service.QueueUpdateAsync(user.Id, "household", CancellationToken.None);
 
         Assert.Equal(IntegrationActionStatus.Queued, result.Status);
-        Assert.Equal(3, handler.Requests.Count);
-        var patch = handler.Requests.Single(request => request.Method == HttpMethod.Patch);
-        Assert.Null(patch.Body);
+        Assert.Equal(2, handler.Requests.Count);
         var put = handler.Requests.Single(request => request.Method == HttpMethod.Put);
         Assert.Equal("application/yaml", put.ContentType);
         var putYaml = Encoding.UTF8.GetString(put.Body!);
@@ -410,7 +402,7 @@ public sealed class CasaOsUpdateServiceTests
         Assert.Equal(IntegrationActionStatus.Queued, rollback.Status);
         Assert.NotEqual(update.BackupId, rollback.SafetyBackupId);
         Assert.Equal(4, handler.Requests.Count);
-        var put = handler.Requests.Single(request => request.Method == HttpMethod.Put);
+        var put = handler.Requests.Last(request => request.Method == HttpMethod.Put);
         Assert.Equal("application/yaml", put.ContentType);
         Assert.Equal(HouseholdYaml, put.Body);
         Assert.Equal("/root/v2/app_management/compose/household", put.PathAndQuery);
@@ -497,9 +489,9 @@ public sealed class CasaOsUpdateServiceTests
         var result = await service.QueueUpdateAsync(user.Id, "household", CancellationToken.None);
 
         Assert.Equal(IntegrationActionStatus.Queued, result.Status);
-        var patch = handler.Requests.Single(request => request.Method == HttpMethod.Patch);
-        Assert.Null(patch.Body);
-        Assert.Equal("/root/v2/app_management/compose/household?force=true", patch.PathAndQuery);
+        var put = handler.Requests.Single(request => request.Method == HttpMethod.Put);
+        Assert.Equal("application/yaml", put.ContentType);
+        Assert.Equal("/root/v2/app_management/compose/household", put.PathAndQuery);
     }
 
     [Fact]
@@ -570,11 +562,6 @@ public sealed class CasaOsUpdateServiceTests
     };
 
     private static HttpResponseMessage JsonResponse(string json) => new(HttpStatusCode.OK)
-    {
-        Content = new StringContent(json, Encoding.UTF8, "application/json"),
-    };
-
-    private static HttpResponseMessage ErrorJsonResponse(HttpStatusCode statusCode, string json) => new(statusCode)
     {
         Content = new StringContent(json, Encoding.UTF8, "application/json"),
     };
