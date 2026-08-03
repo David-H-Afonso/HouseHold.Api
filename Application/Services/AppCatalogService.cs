@@ -255,7 +255,7 @@ public sealed class AppCatalogService(
             NormalizeBrowserUrl(item.IconUrl, true),
             NormalizeBrowserUrl(item.OpenUrl, false),
             favorite,
-            ResolveHealth(monitoringEnabled, frontStatus, apiStatus, containerStatus),
+            ResolveHealth(monitoringEnabled, frontStatus, apiStatus),
             frontStatus,
             apiStatus,
             userConnectionStatus,
@@ -327,15 +327,12 @@ public sealed class AppCatalogService(
     private static IntegrationHealthStatus ResolveHealth(
         bool monitoringEnabled,
         string frontStatus,
-        string apiStatus,
-        string containerStatus)
+        string apiStatus)
     {
         if (!monitoringEnabled) return IntegrationHealthStatus.Unknown;
         if (frontStatus == "offline" || apiStatus == "offline") return IntegrationHealthStatus.Offline;
-        if (containerStatus is not ("running" or "unknown")) return IntegrationHealthStatus.Offline;
         if (frontStatus == "degraded" || apiStatus == "degraded") return IntegrationHealthStatus.Degraded;
-        var hasHealthyCheck = frontStatus == "healthy" || apiStatus == "healthy";
-        if (containerStatus == "running" && (hasHealthyCheck || frontStatus == "not_configured" && apiStatus == "not_configured"))
+        if (frontStatus == "healthy" || apiStatus == "healthy")
             return IntegrationHealthStatus.Healthy;
         return IntegrationHealthStatus.Unknown;
     }
