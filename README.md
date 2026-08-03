@@ -188,12 +188,12 @@ the link or browser session.
 
 ### CasaOS Update Operations (Admin Only)
 
-Household creates a private Compose recovery backup, then queues the official individual update with `PATCH /v2/app_management/compose/{projectName}?force=true`. Catalog IDs map explicitly to CasaOS projects, such as `seerr` to `big-bear-seerr`. Immich is monitor/open-only, CasaOS is link-only, and there is no bulk update endpoint.
+Household creates a private Compose recovery backup, then queues an individual CasaOS update. It uses `PATCH /v2/app_management/compose/{projectName}?force=true` for AppStore projects and falls back to reapplying the current Compose with `PUT` for self-published projects. Catalog IDs map explicitly to CasaOS projects, such as `seerr` to `big-bear-seerr`. Immich is monitor/open-only, CasaOS is link-only, and there is no bulk update endpoint.
 
 | Method | Route | Body / result |
 | --- | --- | --- |
 | GET/PUT | `/api/v1/admin/casaos/config` | Write-only internal base URL/raw token configuration. |
-| POST | `/api/v1/admin/casaos/apps/{appId}/update` | `{ "confirmation": "UPDATE <appId>" }`; returns HTTP 202 queued/accepted metadata. |
+| POST | `/api/v1/admin/casaos/apps/{appId}/update` | No body; returns HTTP 202 queued/accepted metadata. |
 | POST | `/api/v1/admin/casaos/apps/{appId}/rollback` | Conservatively returns `rollback_not_safe` until automated eligibility can be proven. |
 | GET | `/api/v1/admin/casaos/apps/{appId}/actions` | Latest 50 update/rollback audit records. |
 | GET | `/api/v1/admin/casaos/apps/{appId}/actions/{actionLogId}` | One accepted/failed record; it is not live CasaOS completion status. |

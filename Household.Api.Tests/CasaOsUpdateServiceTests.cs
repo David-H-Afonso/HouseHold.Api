@@ -346,6 +346,36 @@ public sealed class CasaOsUpdateServiceTests
     }
 
     [Fact]
+    public async Task Update_ReappliesCurrentComposeWhenCasaOsAppIsNotInAnAppStore()
+    {
+        await using var fixture = await UserSettingsServiceTests.TestDb.CreateAsync();
+        var user = await fixture.AddUserAsync("admin@example.test");
+        using var temp = TempDirectory.Create();
+        var handler = new RecordingHandler(request => request.Method switch
+        {
+            var method when method == HttpMethod.Get => YamlResponse(HouseholdYaml),
+            var method when method == HttpMethod.Patch => ErrorJsonResponse(
+                HttpStatusCode.InternalServerError,
+                "{\"message\":\"not found in app store\"}"
+            ),
+            _ => JsonResponse("{\"message\":\"accepted\"}"),
+        });
+        var service = CreateService(fixture, handler, new EphemeralDataProtectionProvider(), temp.Path);
+        await ConfigureAsync(service);
+
+        var result = await service.QueueUpdateAsync(user.Id, "household", CancellationToken.None);
+
+        Assert.Equal(IntegrationActionStatus.Queued, result.Status);
+        Assert.Equal(3, handler.Requests.Count);
+        var patch = handler.Requests.Single(request => request.Method == HttpMethod.Patch);
+        Assert.Null(patch.Body);
+        var put = handler.Requests.Single(request => request.Method == HttpMethod.Put);
+        Assert.Equal("application/yaml", put.ContentType);
+        Assert.Equal(HouseholdYaml, put.Body);
+        Assert.Equal("/root/v2/app_management/compose/household", put.PathAndQuery);
+    }
+
+    [Fact]
     public async Task Rollback_RestoresBackupAndCreatesSafetyBackup()
     {
         await using var fixture = await UserSettingsServiceTests.TestDb.CreateAsync();
@@ -533,6 +563,11 @@ public sealed class CasaOsUpdateServiceTests
     };
 
     private static HttpResponseMessage JsonResponse(string json) => new(HttpStatusCode.OK)
+    {
+        Content = new StringContent(json, Encoding.UTF8, "application/json"),
+    };
+
+    private static HttpResponseMessage ErrorJsonResponse(HttpStatusCode statusCode, string json) => new(statusCode)
     {
         Content = new StringContent(json, Encoding.UTF8, "application/json"),
     };

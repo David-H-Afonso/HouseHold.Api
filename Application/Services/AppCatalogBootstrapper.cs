@@ -80,9 +80,15 @@ public sealed class AppCatalogBootstrapper(
             if (group.Count() > 1)
                 logger.LogWarning("Disabled duplicate app catalog IDs matching {AppId}.", canonical.AppId);
         }
+        var imported = await loader.LoadAsync(cancellationToken);
+        var importedById = imported
+            .GroupBy(item => item.Id.Trim(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+
         var newlyCreatedIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var seed in Catalog)
         {
+            importedById.TryGetValue(seed.Id, out var configured);
             if (!existingById.TryGetValue(seed.Id, out var item))
             {
                 item = new AppLauncherItem
@@ -92,6 +98,7 @@ public sealed class AppCatalogBootstrapper(
                     Category = seed.Category,
                     Description = seed.Description,
                     IconUrl = seed.Id == "household" ? "/household-mark.svg" : null,
+                    InternalUrl = NormalizeConfiguredUrl(configured?.InternalUrl),
                     OpenUrl = seed.OpenUrl,
                     ExternalUrl = seed.OpenUrl,
                     Favorite = seed.Favorite,
@@ -107,9 +114,11 @@ public sealed class AppCatalogBootstrapper(
                 item.OpenUrl = seed.OpenUrl;
                 item.ExternalUrl = seed.OpenUrl;
             }
+
+            if (configured is not null)
+                item.InternalUrl = NormalizeConfiguredUrl(configured.InternalUrl);
         }
 
-        var imported = await loader.LoadAsync(cancellationToken);
         foreach (var source in imported)
         {
             var id = NormalizeId(source.Id);
@@ -134,6 +143,7 @@ public sealed class AppCatalogBootstrapper(
                 Category = string.IsNullOrWhiteSpace(source.Category) ? "Other" : source.Category.Trim(),
                 Description = TrimToNull(source.Description),
                 IconUrl = AppCatalogService.NormalizeBrowserUrl(source.IconUrl, true),
+                InternalUrl = NormalizeConfiguredUrl(source.InternalUrl),
                 OpenUrl = AppCatalogService.NormalizeBrowserUrl(source.OpenUrl, false),
                 ExternalUrl = AppCatalogService.NormalizeBrowserUrl(source.OpenUrl, false),
                 Favorite = source.Favorite,
@@ -154,13 +164,17 @@ public sealed class AppCatalogBootstrapper(
         }
         foreach (var seed in Catalog.Where(item => item.MonitoringEnabled))
         {
+            importedById.TryGetValue(seed.Id, out var configured);
+            var healthCheckUrl = configured is null
+                ? seed.HealthCheckUrl
+                : NormalizeConfiguredUrl(configured.HealthCheckUrl);
             if (policiesById.TryGetValue(seed.Id, out var existingPolicy))
             {
                 existingPolicy.DisplayName = seed.Name;
                 existingPolicy.ComposePath = seed.ProjectName!;
                 existingPolicy.ProjectName = seed.ProjectName;
                 existingPolicy.ContainerNamesJson = JsonSerializer.Serialize(seed.ContainerNames);
-                existingPolicy.HealthCheckUrl = seed.HealthCheckUrl;
+                existingPolicy.HealthCheckUrl = healthCheckUrl;
                 existingPolicy.HealthCheckTimeoutSeconds = 5;
                 existingPolicy.AllowedActionsJson = JsonSerializer.Serialize(
                     seed.CanUpdate ? new[] { "monitor", "update" } : new[] { "monitor" });
@@ -175,7 +189,7 @@ public sealed class AppCatalogBootstrapper(
                 ProjectName = seed.ProjectName,
                 ContainerNamesJson = JsonSerializer.Serialize(seed.ContainerNames),
                 AllowedActionsJson = JsonSerializer.Serialize(seed.CanUpdate ? new[] { "monitor", "update" } : new[] { "monitor" }),
-                HealthCheckUrl = seed.HealthCheckUrl,
+                HealthCheckUrl = healthCheckUrl,
                 HealthCheckTimeoutSeconds = 5,
                 AdminActionsEnabled = seed.CanUpdate,
             };
@@ -255,6 +269,9 @@ public sealed class AppCatalogBootstrapper(
     }
 
     private static string? TrimToNull(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static string? NormalizeConfiguredUrl(string? value) =>
+        AppCatalogService.NormalizeBrowserUrl(value, false);
 
     private sealed record CatalogSeed(
         string Id,

@@ -139,6 +139,26 @@ public sealed class AppCatalogBootstrapperTests
         Assert.Equal("http://seerr:5055/api/v1/status", policy.HealthCheckUrl);
     }
 
+    [Fact]
+    public async Task Bootstrap_PersistsConfiguredLanHealthTargetForSplitCasaOsStacks()
+    {
+        await using var fixture = await UserSettingsServiceTests.TestDb.CreateAsync();
+        var configured = new AppLauncherConfigItem
+        {
+            Id = "beastvault",
+            Name = "Beast Vault",
+            InternalUrl = "http://192.168.0.32:8081",
+            HealthCheckUrl = "http://192.168.0.32:8081/health",
+        };
+
+        await CreateBootstrapper(fixture, [configured]).EnsureSeededAsync(CancellationToken.None);
+
+        var item = fixture.Db.AppLauncherItems.Single(entry => entry.AppId == "beastvault");
+        var policy = fixture.Db.AllowedComposeApps.Single(entry => entry.AppId == "beastvault");
+        Assert.Equal("http://192.168.0.32:8081", item.InternalUrl);
+        Assert.Equal("http://192.168.0.32:8081/health", policy.HealthCheckUrl);
+    }
+
     private static AppCatalogBootstrapper CreateBootstrapper(
         UserSettingsServiceTests.TestDb fixture,
         IReadOnlyList<AppLauncherConfigItem>? items = null) =>
