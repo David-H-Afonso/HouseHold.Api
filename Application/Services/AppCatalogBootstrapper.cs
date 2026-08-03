@@ -271,7 +271,7 @@ public sealed class AppCatalogBootstrapper(
     private static string? TrimToNull(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     private static string? NormalizeConfiguredUrl(string? value) =>
-        AppCatalogService.NormalizeBrowserUrl(value, false);
+        AppCatalogService.NormalizeBrowserUrl(value, false)?.TrimEnd('/');
 
     private sealed record CatalogSeed(
         string Id,
