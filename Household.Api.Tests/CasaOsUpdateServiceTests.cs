@@ -21,6 +21,9 @@ public sealed class CasaOsUpdateServiceTests
     private static readonly byte[] HouseholdYaml = Encoding.UTF8.GetBytes(
         "name: household\nservices:\n  api:\n    image: ghcr.io/example/household-api:latest\n    environment:\n      PRIVATE_VALUE: server-secret\n"
     );
+    private static readonly byte[] VersionedHouseholdYaml = Encoding.UTF8.GetBytes(
+        "name: household\nservices:\n  api:\n    image: ghcr.io/example/household-api:2026.08\n  web:\n    image: ghcr.io/example/household-web@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
+    );
 
     [Fact]
     public async Task Config_IsPurposeProtectedAndResponseDoesNotExposeTokenOrInternalUrl()
@@ -353,7 +356,7 @@ public sealed class CasaOsUpdateServiceTests
         using var temp = TempDirectory.Create();
         var handler = new RecordingHandler(request => request.Method switch
         {
-            var method when method == HttpMethod.Get => YamlResponse(HouseholdYaml),
+            var method when method == HttpMethod.Get => YamlResponse(VersionedHouseholdYaml),
             var method when method == HttpMethod.Patch => ErrorJsonResponse(
                 HttpStatusCode.InternalServerError,
                 "{\"message\":\"not found in app store\"}"
@@ -371,7 +374,11 @@ public sealed class CasaOsUpdateServiceTests
         Assert.Null(patch.Body);
         var put = handler.Requests.Single(request => request.Method == HttpMethod.Put);
         Assert.Equal("application/yaml", put.ContentType);
-        Assert.Equal(HouseholdYaml, put.Body);
+        var putYaml = Encoding.UTF8.GetString(put.Body!);
+        Assert.Contains("ghcr.io/example/household-api:latest", putYaml);
+        Assert.Contains("ghcr.io/example/household-web:latest", putYaml);
+        Assert.DoesNotContain("2026.08", putYaml);
+        Assert.DoesNotContain("@sha256:", putYaml);
         Assert.Equal("/root/v2/app_management/compose/household", put.PathAndQuery);
     }
 

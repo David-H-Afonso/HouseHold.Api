@@ -35,7 +35,7 @@ public sealed class CasaOsUpdateService : ICasaOsUpdateService
         RegexOptions.CultureInvariant | RegexOptions.NonBacktracking
     );
     private static readonly Regex SafeImagePattern = new(
-        @"^[A-Za-z0-9][A-Za-z0-9._/:-]{0,299}$",
+        @"^[A-Za-z0-9][A-Za-z0-9._/@:-]{0,299}$",
         RegexOptions.CultureInvariant | RegexOptions.NonBacktracking
     );
     private static readonly JsonSerializerOptions AuditJsonOptions = new(JsonSerializerDefaults.Web)
@@ -338,7 +338,12 @@ public sealed class CasaOsUpdateService : ICasaOsUpdateService
 
                 var usedComposeReapply = !await TryPatchUpdateAsync(connection, projectName, cancellationToken);
                 if (usedComposeReapply)
-                    await PutComposeAsync(connection, projectName, currentYaml, cancellationToken);
+                    await PutComposeAsync(
+                        connection,
+                        projectName,
+                        NormalizeComposeImagesToLatest(currentYaml),
+                        cancellationToken
+                    );
                 accepted = true;
                 actionLog.Status = IntegrationActionStatus.Queued;
                 await _db.SaveChangesAsync(cancellationToken);
@@ -1006,6 +1011,72 @@ public sealed class CasaOsUpdateService : ICasaOsUpdateService
             throw InvalidComposeResponse();
 
         return images;
+    }
+
+    private static byte[] NormalizeComposeImagesToLatest(byte[] yaml)
+    {
+        var text = StrictUtf8.GetString(yaml);
+        var lines = text.Split('\n');
+        var blockKeys = new Stack<(int Indent, string Key)>();
+        for (var index = 0; index < lines.Length; index++)
+        {
+            var rawLine = lines[index];
+            var line = rawLine.TrimEnd('\r');
+            if (line.Length == 0 || line.TrimStart().StartsWith('#'))
+                continue;
+
+            var indent = line.TakeWhile(character => character == ' ').Count();
+            var trimmed = line[indent..];
+            while (blockKeys.Count > 0 && blockKeys.Peek().Indent >= indent)
+                blockKeys.Pop();
+
+            var separator = trimmed.IndexOf(':');
+            if (separator > 0)
+            {
+                var key = trimmed[..separator].Trim();
+                var rawValue = trimmed[(separator + 1)..];
+                if (key == "image"
+                    && IsServiceImagePath(blockKeys)
+                    && TryReadSimpleYamlScalar(rawValue, out var image)
+                    && SafeImagePattern.IsMatch(image))
+                {
+                    var latestImage = NormalizeImageTag(image);
+                    if (!string.Equals(image, latestImage, StringComparison.Ordinal))
+                    {
+                        var lineEnding = rawLine.EndsWith('\r') ? "\r" : string.Empty;
+                        lines[index] = ReplaceYamlScalar(line, separator, latestImage) + lineEnding;
+                    }
+                }
+
+                if (string.IsNullOrWhiteSpace(rawValue) || rawValue.TrimStart().StartsWith('#'))
+                    blockKeys.Push((indent, key));
+            }
+        }
+
+        return Encoding.UTF8.GetBytes(string.Join('\n', lines));
+    }
+
+    private static string ReplaceYamlScalar(string line, int separator, string value)
+    {
+        var rawValue = line[(separator + 1)..];
+        var leadingWhitespaceLength = rawValue.TakeWhile(char.IsWhiteSpace).Count();
+        var commentIndex = rawValue.IndexOf(" #", StringComparison.Ordinal);
+        var comment = commentIndex >= 0 ? rawValue[commentIndex..] : string.Empty;
+        return line[..(separator + 1)]
+            + rawValue[..leadingWhitespaceLength]
+            + value
+            + comment;
+    }
+
+    private static string NormalizeImageTag(string image)
+    {
+        var digestSeparator = image.IndexOf('@');
+        var withoutDigest = digestSeparator >= 0 ? image[..digestSeparator] : image;
+        var lastSlash = withoutDigest.LastIndexOf('/');
+        var lastColon = withoutDigest.LastIndexOf(':');
+        return lastColon > lastSlash
+            ? withoutDigest[..lastColon] + ":latest"
+            : withoutDigest + ":latest";
     }
 
     private static bool IsServiceImagePath(Stack<(int Indent, string Key)> blockKeys)
